@@ -1,0 +1,6 @@
+{
+  "name": "등급컷.com",
+  "description": "시험 직후 실시간 표본 데이터를 바탕으로 예상 점수, 등수, 등급컷을 확인하는 가채점 서비스",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

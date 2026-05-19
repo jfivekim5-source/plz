@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and account information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "status": { "type": "string", "enum": ["pending", "approved"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "status"]
+    },
+    "Exam": {
+      "title": "Exam",
+      "description": "Exam metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "grade": { "type": "string" },
+        "subject": { "type": "string" },
+        "examDate": { "type": "string", "format": "date" },
+        "isOpen": { "type": "boolean" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "grade", "subject", "isOpen"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Correct answer and score for a specific question in an exam",
+      "type": "object",
+      "properties": {
+        "examId": { "type": "string" },
+        "number": { "type": "integer" },
+        "answer": { "type": "string" },
+        "score": { "type": "number" },
+        "type": { "type": "string", "enum": ["multiple", "subjective"] }
+      },
+      "required": ["examId", "number", "answer", "score"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "User answer submission for an exam",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "examId": { "type": "string" },
+        "totalScore": { "type": "number" },
+        "submittedAt": { "type": "string", "format": "date-time" },
+        "answers": {
+          "type": "array",
+          "description": "List of user answers"
+        }
+      },
+      "required": ["userId", "examId", "totalScore", "submittedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of user profiles"
+    },
+    "/exams/{examId}": {
+      "schema": "Exam",
+      "description": "Collection of exams"
+    },
+    "/exams/{examId}/questions/{questionId}": {
+      "schema": "Question",
+      "description": "Correct answers and points for an exam"
+    },
+    "/exams/{examId}/submissions/{userId}": {
+      "schema": "Submission",
+      "description": "Student submissions for an exam"
+    }
+  }
+}
