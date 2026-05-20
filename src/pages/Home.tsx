@@ -6,12 +6,14 @@ import { ExamService, SubmissionService } from '@/src/services/dataService';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export default function Home() {
-  const { user } = useAuth();
+  const { user, userData } = useAuth();
   const navigate = useNavigate();
   const [exams, setExams] = useState<any[]>([]);
   const [gradeCuts, setGradeCuts] = useState<Record<string, number>>({});
   const [mySubmissions, setMySubmissions] = useState<Record<string, boolean>>({});
   const [slideIndex, setSlideIndex] = useState(0);
+  const [schoolRanks, setSchoolRanks] = useState<any[]>([]);
+  const [mySchoolRank, setMySchoolRank] = useState<any | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -49,9 +51,96 @@ export default function Home() {
         }
       });
       setGradeCuts(cuts);
+
+      // Calculate school-wide cumulatives
+      const examPercentiles: Record<string, Record<string, number>> = {};
+      e.forEach(exam => {
+        const subs = allSubs.filter(s => s.examId === exam.id);
+        const sorted = [...subs].sort((a, b) => b.totalScore - a.totalScore);
+        const total = sorted.length;
+        examPercentiles[exam.id] = {};
+        
+        let currentRank = 1;
+        sorted.forEach((sub, idx) => {
+          if (idx > 0 && sub.totalScore !== sorted[idx - 1].totalScore) {
+            currentRank = idx + 1;
+          }
+          const rank = currentRank;
+          const percentileValue = total > 1 ? Math.round(((total - rank) / (total - 1)) * 100) : 100;
+          examPercentiles[exam.id][sub.userId] = percentileValue;
+        });
+      });
+
+      // Group by userId
+      const userIdsSet = new Set<string>();
+      allSubs.forEach(s => userIdsSet.add(s.userId));
+      const userIds = Array.from(userIdsSet);
+
+      const usersDb = localStorage.getItem('exam_app_users_db');
+      const allUsersMap = usersDb ? JSON.parse(usersDb) : {};
+
+      const rankList = userIds.map(uid => {
+        let sumPercentile = 0;
+        let examCount = 0;
+        e.forEach(exam => {
+          if (examPercentiles[exam.id] && examPercentiles[exam.id][uid] !== undefined) {
+            sumPercentile += examPercentiles[exam.id][uid];
+            examCount++;
+          }
+        });
+
+        const userProfile = allUsersMap[uid];
+        const isPrivate = uid === user?.uid 
+          ? !!userData?.isPrivate 
+          : (userProfile?.isPrivate || false);
+        
+        // Define display name
+        let displayName = uid;
+        if (isPrivate) {
+          displayName = 'Unknown';
+        } else if (userProfile) {
+          displayName = userProfile.studentId || userProfile.name || uid;
+        } else if (uid.startsWith('DUMMY-')) {
+          displayName = uid.replace('DUMMY-', '');
+        }
+
+        return {
+          userId: uid,
+          sumPercentile,
+          examCount,
+          displayName,
+          isPrivate
+        };
+      });
+
+      const sortedRanks = rankList.sort((a, b) => b.sumPercentile - a.sumPercentile);
+      
+      let curRank = 1;
+      const processedRanks = sortedRanks.map((item, idx) => {
+        if (idx > 0 && item.sumPercentile !== sortedRanks[idx - 1].sumPercentile) {
+          curRank = idx + 1;
+        }
+        return {
+          ...item,
+          rank: curRank
+        };
+      });
+
+      setSchoolRanks(processedRanks);
+
+      if (user) {
+        const myItem = processedRanks.find(r => r.userId === user.uid);
+        if (myItem) {
+          setMySchoolRank(myItem);
+        } else {
+          setMySchoolRank(null);
+        }
+      } else {
+        setMySchoolRank(null);
+      }
     }
     load();
-  }, [user]);
+  }, [user, userData]);
 
   return (
     <div className="space-y-20 py-12">
@@ -133,10 +222,10 @@ export default function Home() {
                               <p className="text-xs font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-4 py-1.5 rounded-full">
                                 {exam.title}
                               </p>
-                              <div className="space-y-1.5">
+                              <div className="space-y-1.5 font-sans">
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">1st Grade Cut</p>
                                 <p className="text-5xl font-black text-slate-900 tracking-tighter">
-                                  {hasSubmitted ? `${gradeCuts[exam.id] || 0}점` : '??점'}
+                                  {hasSubmitted || userData?.role === 'admin' ? `${gradeCuts[exam.id] || 0}점` : '??점'}
                                 </p>
                               </div>
                             </div>
@@ -169,7 +258,7 @@ export default function Home() {
           </div>
           <h3 className="text-xl font-bold text-slate-900">빠른 답안 입력</h3>
           <p className="text-slate-500 text-sm leading-relaxed">
-            간편한 인터페이스로 모의고사 답안을 1분 만에 입력할 수 있습니다.
+            간편한 인터페이스로 답안을 1분 만에 입력할 수 있습니다.
           </p>
         </div>
 
@@ -180,7 +269,7 @@ export default function Home() {
           </div>
           <h3 className="text-xl font-bold text-slate-900">실시간 데이터 분석</h3>
           <p className="text-slate-500 text-sm leading-relaxed">
-            전체 사용자들의 데이터를 실계산하여 정확도 높은 등급컷을 산출합니다.
+            사용자들의 데이터를 기반으로 보정하여 정확도 높은 등급컷을 산출합니다.
           </p>
         </div>
 
@@ -203,6 +292,116 @@ export default function Home() {
           </div>
         </Link>
       </section>
+
+      {/* 나는 전교 몇등일까? (전교 석차) Section */}
+      {user && schoolRanks.length > 0 && (
+        <section className="max-w-4xl mx-auto px-4 space-y-8 pt-6">
+          <div className="text-center space-y-2">
+            <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center justify-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-indigo-650 bg-indigo-600 animate-pulse animate-duration-1000"></span>
+              나는 전교 몇등일까?
+            </h2>
+            <p className="text-sm text-slate-400 font-medium">
+              모든 과목의 예측 백분위를 합산하여 실시간으로 정렬한 전교 누적 석차입니다 (상위 50위만 공개).
+            </p>
+          </div>
+
+          {/* My Rank Card */}
+          {mySchoolRank ? (
+            <div className="p-8 bg-gradient-to-r from-indigo-50 to-cyan-50 border border-indigo-100 rounded-[32px] flex flex-col sm:flex-row items-center justify-between gap-6 shadow-md shadow-indigo-100/10">
+              <div className="space-y-2 text-center sm:text-left">
+                <span className="text-[10px] font-black tracking-wider text-indigo-600 uppercase bg-white px-3 py-1 rounded-full shadow-sm">학습자님 현재 석차</span>
+                <h3 className="text-2xl font-black text-slate-800 tracking-tight">
+                  {userData?.isPrivate ? '익명 설정 활성화 상태 (성적표 비공개)' : `${mySchoolRank.displayName} 학생의 통합 석차`}
+                </h3>
+                <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                  총 {schoolRanks.length}명의 응시자 중, 총 {mySchoolRank.examCount}과목의 백분위를 합산한 결과입니다.
+                </p>
+              </div>
+
+              <div className="flex flex-col items-center sm:items-end justify-center">
+                <span className="text-slate-400 text-[10px] font-bold tracking-widest uppercase">전교 석차</span>
+                <span className="text-5xl font-black text-indigo-600 tracking-tighter">
+                  {mySchoolRank.rank}위
+                </span>
+                <span className="text-[11px] font-bold text-slate-500 mt-1">
+                  백분위 합: <span className="text-cyan-600 font-bold">{mySchoolRank.sumPercentile}%</span>
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="p-8 bg-slate-50 border border-slate-200 rounded-[32px] text-center space-y-3">
+              <p className="text-slate-500 font-bold text-sm">응시한 과목이 없어 석차가 표시되지 않습니다.</p>
+              <p className="text-xs text-slate-400">최소 1개의 과목에 빠른 답안을 입력해 가채점 결과를 등록해야 전교 석차가 산출됩니다.</p>
+            </div>
+          )}
+
+          {/* Top 50 Leaderboard Table */}
+          <div className="bg-white border border-slate-150 rounded-[32px] overflow-hidden shadow-xl shadow-slate-100/50">
+            <div className="p-6 md:p-8 border-b border-slate-100 flex items-center justify-between">
+              <span className="font-semibold text-xs text-slate-400 tracking-wider font-mono">RANKINGS (TOP 50)</span>
+              <span className="text-xs font-black text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-xl">전교 응시자: {schoolRanks.length}명</span>
+            </div>
+
+            <div className="max-h-[460px] overflow-y-auto divide-y divide-slate-100 custom-scrollbar">
+              {schoolRanks.slice(0, 50).map((row, index) => {
+                const isMe = row.userId === user.uid;
+                
+                return (
+                  <div 
+                    key={`school-rank-${row.userId}`} 
+                    className={cn(
+                      "px-6 py-5 flex items-center justify-between gap-4 transition-colors",
+                      isMe 
+                        ? "bg-indigo-50/40 hover:bg-indigo-50/60" 
+                        : "hover:bg-slate-50/50"
+                    )}
+                  >
+                    <div className="flex items-center gap-4">
+                      {/* Rank Badge */}
+                      <div className={cn(
+                        "w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shrink-0",
+                        row.rank === 1 ? "bg-amber-100 text-amber-700 font-extrabold ring-2 ring-amber-300 ring-offset-1" :
+                        row.rank === 2 ? "bg-slate-150 text-slate-700 ring-2 ring-slate-300 ring-offset-1" :
+                        row.rank === 3 ? "bg-orange-100 text-orange-700 ring-2 ring-orange-300 ring-offset-1" :
+                        "bg-slate-50 text-slate-500"
+                      )}>
+                        {row.rank}
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className={cn(
+                            "font-extrabold text-sm tracking-tight",
+                            isMe ? "text-indigo-600 underline decoration-indigo-200 underline-offset-2" : "text-slate-800"
+                          )}>
+                            {row.displayName}
+                          </span>
+                          {isMe && (
+                            <span className="text-[9px] font-black text-white bg-indigo-600 px-1.5 py-0.5 rounded-md uppercase tracking-wider">
+                              MY
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block sm:inline">
+                          응시: {row.examCount}과목
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">백분위 합산</p>
+                      <p className="text-base font-black text-slate-900 font-sans tracking-tight">
+                        {row.sumPercentile}%
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

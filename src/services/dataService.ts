@@ -210,7 +210,51 @@ export const ExamService = {
     }
   },
 
+  async saveQuestions(examId: string, questions: Question[]): Promise<void> {
+    localStorage.setItem(`custom_questions_${examId}`, JSON.stringify(questions));
+
+    // Recalculate and update existing real submissions for this exam!
+    const saved = localStorage.getItem(REAL_SUBMISSIONS_KEY);
+    if (saved) {
+      const submissions: Submission[] = JSON.parse(saved);
+      const updatedSubmissions = submissions.map(sub => {
+        if (sub.examId !== examId) return sub;
+
+        let totalScore = 0;
+        const updatedAnswers = sub.answers.map(ans => {
+          const q = questions.find(item => item.number === ans.number);
+          if (!q) return ans;
+
+          if (q.type === 'multiple') {
+            const isCorrect = q.answer === ans.userAnswer;
+            const score = isCorrect ? q.score : 0;
+            totalScore += score;
+            return { ...ans, isCorrect, score };
+          } else {
+            totalScore += ans.score;
+            return ans;
+          }
+        });
+
+        return {
+          ...sub,
+          answers: updatedAnswers,
+          totalScore
+        };
+      });
+      localStorage.setItem(REAL_SUBMISSIONS_KEY, JSON.stringify(updatedSubmissions));
+    }
+  },
+
   async getQuestions(examId: string): Promise<Question[]> {
+    const savedKey = `custom_questions_${examId}`;
+    const savedData = localStorage.getItem(savedKey);
+    if (savedData) {
+      try {
+        return JSON.parse(savedData);
+      } catch (e) {}
+    }
+
     const exams = await this.getExams();
     const generateMockQuestions = (id: string): Question[] => {
       const exam = exams.find(e => e.id === id);
@@ -366,6 +410,7 @@ export const SubmissionService = {
         examId: examId,
         answers: [],
         totalScore,
+        isDummy: true, // Marker for artificial accounts
         submittedAt: new Date(Date.now() - Math.random() * 86400000).toISOString()
       });
     }
@@ -373,14 +418,7 @@ export const SubmissionService = {
   },
 
   async getAllSubmissions(examId: string): Promise<Submission[]> {
-    let capacity = 100;
-    if (examId === 'exam-speech-lang' || examId === 'exam-algebra' || examId === 'exam-english1') {
-      capacity = 400;
-    } else if (examId === 'exam-physics' || examId === 'exam-earth') {
-      capacity = 200;
-    } else if (examId === 'exam-chemistry') {
-      capacity = 150;
-    }
+    const capacity = 400; // Constrained to exactly 400 for all subjects as requested
 
     const dummyList = this.generateDummySubmissions(examId, capacity);
 
@@ -389,16 +427,16 @@ export const SubmissionService = {
       try {
         const snapshot = await getDocs(collection(db, 'exams', examId, 'submissions'));
         if (!snapshot.empty) {
-          realSubs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Submission));
+          realSubs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), isDummy: false } as any as Submission));
         }
       } catch (error) {
         console.warn('Firestore fetch failed, falling back to mock data', error);
         realSubs = await this.getRealSubmissions();
-        realSubs = realSubs.filter(s => s.examId === examId);
+        realSubs = realSubs.filter(s => s.examId === examId).map(s => ({ ...s, isDummy: false }));
       }
     } else {
       realSubs = await this.getRealSubmissions();
-      realSubs = realSubs.filter(s => s.examId === examId);
+      realSubs = realSubs.filter(s => s.examId === examId).map(s => ({ ...s, isDummy: false }));
     }
 
     const realCount = realSubs.length;

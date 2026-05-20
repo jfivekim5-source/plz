@@ -45,6 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Reset/Ensure specific accounts exist
       const adminId = '26-20411';
       const studentId = '26-20410';
+      const studentId2 = '26-20412';
 
       if (!db[adminId]) {
         db[adminId] = {
@@ -63,6 +64,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           studentId: studentId,
           name: studentId,
           code: 'PASS-TEST',
+          role: 'user',
+          status: 'approved',
+          isProfileComplete: false,
+        };
+      }
+
+      if (!db[studentId2]) {
+        db[studentId2] = {
+          uid: studentId2,
+          studentId: studentId2,
+          name: studentId2,
+          code: 'CODE-20412',
           role: 'user',
           status: 'approved',
           isProfileComplete: false,
@@ -105,8 +118,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const loginWithID = async (id: string, pass: string) => {
-    const cleanId = id.trim().toUpperCase();
+    let cleanId = id.trim().toUpperCase();
     if (!cleanId) throw new Error('학번을 입력해 주세요.');
+
+    // Auto prepends 26- if user inputs standard 5-digit student ID like 20412
+    if (/^\d{5}$/.test(cleanId)) {
+      cleanId = `26-${cleanId}`;
+    }
 
     const db = getInternalDB();
     const existingUser = db[cleanId];

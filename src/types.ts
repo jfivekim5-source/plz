@@ -23,6 +23,7 @@ export interface Submission {
   examId: string;
   totalScore: number;
   submittedAt: string;
+  isDummy?: boolean;
   answers: {
     number: number;
     userAnswer: string;

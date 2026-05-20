@@ -14,6 +14,7 @@ export default function ExamInput() {
   const [exam, setExam] = useState<Exam | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [unknownQuestions, setUnknownQuestions] = useState<Record<number, boolean>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showUnansweredOnly, setShowUnansweredOnly] = useState(false);
@@ -35,10 +36,15 @@ export default function ExamInput() {
           // If a prior submission exists for this user, pre-fill the answers!
           if (mySub && mySub.answers) {
             const prefilled: Record<number, string> = {};
+            const loadedUnknowns: Record<number, boolean> = {};
             mySub.answers.forEach(ans => {
               prefilled[ans.number] = ans.userAnswer;
+              if (ans.userAnswer === '') {
+                loadedUnknowns[ans.number] = true;
+              }
             });
             setAnswers(prefilled);
+            setUnknownQuestions(loadedUnknowns);
           }
         }
       } catch (err) {
@@ -54,6 +60,7 @@ export default function ExamInput() {
 
   // Support 1-5 multi-choice toggles
   const handleAnswerSelect = (qNum: number, choice: string) => {
+    setUnknownQuestions(prev => ({ ...prev, [qNum]: false }));
     setAnswers(prev => {
       const currentVal = prev[qNum] || '';
       const selectedList = currentVal ? currentVal.split(',') : [];
@@ -74,6 +81,7 @@ export default function ExamInput() {
 
   // Support subjective absolute points direct setter
   const handleSubjectiveScoreSelect = (qNum: number, pts: string) => {
+    setUnknownQuestions(prev => ({ ...prev, [qNum]: false }));
     setAnswers(prev => ({
       ...prev,
       [qNum]: pts
@@ -226,11 +234,74 @@ export default function ExamInput() {
           <button 
             onClick={handleSubmit}
             disabled={isSubmitting}
-            className="h-14 px-8 bg-indigo-650 hover:bg-indigo-700 text-white rounded-2xl font-bold transition-all flex items-center gap-2 shadow-lg shadow-indigo-150-all disabled:opacity-50"
+            className="h-14 px-8 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-2xl font-bold transition-all flex items-center gap-2 shadow-lg shadow-indigo-100 disabled:bg-indigo-600 disabled:text-white disabled:opacity-50"
           >
             {isSubmitting ? '수정 사항 채점 중...' : '답안 저장 및 채점'}
             <Send size={18} />
           </button>
+        </div>
+      </div>
+
+      {/* 모르는 문제 입력 Panel */}
+      <div className="bg-white border border-slate-200 rounded-[32px] p-6 md:p-8 space-y-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
+              모르는 문제 입력 (마킹 비우기)
+            </h3>
+            <p className="text-xs text-slate-400 font-medium">
+              모르는 문제 번호를 체크하면 해당 문항의 마킹이 자동으로 비워지고 ‘모름’ 상태로 기록됩니다. 아래 1번부터 {exam.questionCount}번까지 나열되어 있습니다.
+            </p>
+          </div>
+          {Object.values(unknownQuestions).filter(Boolean).length > 0 && (
+            <button
+              onClick={() => {
+                if (confirm('모든 모르는 문제 설정을 해제하시겠습니까?')) {
+                  setUnknownQuestions({});
+                }
+              }}
+              className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-xl transition-colors shrink-0"
+            >
+              전체 해제
+            </button>
+          )}
+        </div>
+        
+        <div className="flex flex-wrap gap-2">
+          {Array.from({ length: exam.questionCount }, (_, i) => i + 1).map((qNum) => {
+            const isUnknown = !!unknownQuestions[qNum];
+            return (
+              <button
+                key={`unknown-toggle-${qNum}`}
+                type="button"
+                onClick={() => {
+                  setUnknownQuestions(prev => {
+                    const nextVal = !prev[qNum];
+                    if (nextVal) {
+                      // Automatically clear answer
+                      setAnswers(ansPrev => ({ ...ansPrev, [qNum]: '' }));
+                    }
+                    return { ...prev, [qNum]: nextVal };
+                  });
+                }}
+                className={cn(
+                  "min-w-10 h-10 px-2 rounded-xl text-xs font-bold transition-all border flex flex-col items-center justify-center gap-0.5",
+                  isUnknown 
+                    ? "bg-rose-50 border-rose-200 text-rose-600 scale-105 shadow-sm" 
+                    : "bg-slate-50 border-slate-150 text-slate-600 hover:border-slate-300"
+                )}
+              >
+                <span>{qNum}</span>
+                <span className={cn(
+                  "text-[8px] font-black uppercase tracking-tighter",
+                  isUnknown ? "text-rose-500" : "text-slate-300"
+                )}>
+                  {isUnknown ? '모름' : '선택'}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -244,7 +315,8 @@ export default function ExamInput() {
             return true;
           })
           .map((qNum, i) => {
-            const hasMarked = !!answers[qNum];
+            const isUnknownStatus = !!unknownQuestions[qNum];
+            const hasMarked = !isUnknownStatus && !!answers[qNum];
             const maxScore = getQuestionMaxScore(qNum);
             const questionTypeChoice = isChoiceQuestion(qNum);
             const selectedSet = (answers[qNum] || '').split(',').filter(Boolean);
@@ -258,9 +330,11 @@ export default function ExamInput() {
                 transition={{ delay: (i % 15) * 0.015 }}
                 className={cn(
                   "p-8 bg-white rounded-[32px] border-2 transition-all flex flex-col justify-between h-56",
-                  hasMarked 
-                    ? "border-indigo-500 shadow-xl shadow-indigo-100/50 ring-4 ring-indigo-50" 
-                    : "border-slate-100 hover:border-slate-200"
+                  isUnknownStatus
+                    ? "border-rose-300 shadow-xl shadow-rose-100/30 ring-4 ring-rose-50 bg-rose-50/10"
+                    : hasMarked 
+                      ? "border-indigo-500 shadow-xl shadow-indigo-100/50 ring-4 ring-indigo-50" 
+                      : "border-slate-100 hover:border-slate-200"
                 )}
               >
                 {/* Visual Top Bar */}
@@ -268,17 +342,24 @@ export default function ExamInput() {
                   <div className="flex items-center gap-3">
                     <div className={cn(
                       "w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-sm transition-all shadow-sm",
-                      hasMarked ? "bg-indigo-500 text-white" : "bg-slate-100 text-slate-400"
+                      isUnknownStatus
+                        ? "bg-rose-500 text-white"
+                        : hasMarked ? "bg-indigo-500 text-white" : "bg-slate-100 text-slate-400"
                     )}>
                       {qNum}
                     </div>
                     <span className="text-sm font-bold text-slate-700">
-                      {questionTypeChoice ? '객관식' : '서답형'}
+                      {isUnknownStatus ? '모르는 문제' : (questionTypeChoice ? '객관식' : '서답형')}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <div className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-xl uppercase tracking-wider">
-                      배점 {maxScore}점
+                    <div className={cn(
+                      "text-[10px] font-bold px-3 py-1.5 rounded-xl uppercase tracking-wider",
+                      isUnknownStatus 
+                        ? "text-rose-600 bg-rose-50 animate-pulse" 
+                        : "text-indigo-600 bg-indigo-50"
+                    )}>
+                      {isUnknownStatus ? '채점 시 오답 처리' : `배점 ${maxScore}점`}
                     </div>
                   </div>
                 </div>
@@ -353,9 +434,10 @@ export default function ExamInput() {
         </div>
         <button 
           onClick={handleSubmit}
-          className="h-12 px-6 bg-indigo-650 text-white rounded-2xl font-bold text-sm shadow-lg shadow-indigo-150-all"
+          disabled={isSubmitting}
+          className="h-12 px-6 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-2xl font-bold text-sm shadow-lg shadow-indigo-100 disabled:bg-indigo-600 disabled:text-white disabled:opacity-50"
         >
-          저장하기
+          {isSubmitting ? '저장 중...' : '저장하기'}
         </button>
       </div>
     </div>

@@ -32,15 +32,6 @@ export default function Layout({ children }: LayoutProps) {
           <div className="flex items-center gap-3">
             {user ? (
               <div className="flex items-center gap-4">
-                {userData?.role === 'admin' && (
-                  <Link 
-                    to="/admin"
-                    className="h-10 px-4 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center gap-2 text-xs font-bold hover:bg-indigo-100 transition-colors"
-                  >
-                    <LayoutDashboard size={14} />
-                    사이트 관리
-                  </Link>
-                )}
                 <Link 
                   to="/settings"
                   className="hidden sm:flex flex-col items-end group hover:opacity-80 transition-opacity"
@@ -85,7 +76,7 @@ export default function Layout({ children }: LayoutProps) {
             © 2026 등급컷.com. 모든 예상 데이터는 표본 기반 추정치입니다.
           </p>
           <div className="flex gap-6 items-center">
-            <Link to="/admin" className="text-sm text-slate-600 font-medium hover:text-indigo-600">관리자</Link>
+            <Link to="/admin" className="text-sm text-slate-600 font-medium hover:text-indigo-600">사이트 관리</Link>
             <a href="#" className="text-sm text-slate-400 hover:text-slate-600">이용약관</a>
             <a href="#" className="text-sm text-slate-400 hover:text-slate-600">개인정보</a>
           </div>

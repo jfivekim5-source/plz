@@ -151,9 +151,9 @@ export default function Settings() {
           {/* 4. Privacy Setting (Hide Name) */}
           <div className="p-6 bg-white rounded-[28px] border border-slate-200 flex items-center justify-between">
             <div className="space-y-1">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">개인정보 보호</span>
-              <p className="font-bold text-slate-900">성적표 이름 비공개</p>
-              <p className="text-[10px] text-slate-400">활성화 시 관리자 페이지 등에서 실명 대신 학번으로 표시됩니다.</p>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">개인정보 보호 설정</span>
+              <p className="font-bold text-slate-900">성적표 이름 비공개 (익명 설정)</p>
+              <p className="text-[10px] text-slate-400">활성화 시 성적표와 순위표 상의 이름이 'Unknown'으로 표시되어 다른 전교생 우등생들이 나의 인적 사항을 확인할 수 없게 익명 보장 처리가 이루어집니다.</p>
             </div>
             <button
               onClick={togglePrivacy}
