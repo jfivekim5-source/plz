@@ -60,8 +60,24 @@ export default function Login() {
 
   if (loading) return null;
 
-  // STEP: Password Setup (Required for first-time CODE login)
-  if (user && userData && !userData.isProfileComplete && userData.code) {
+  // STEP: Password Setup (Required for first-time login, but only show EXACTLY ONCE)
+  const promptKey = userData ? `password_prompt_seen_${userData.uid}` : '';
+  const promptSeen = promptKey ? localStorage.getItem(promptKey) === 'true' : false;
+
+  const handleSkipSetup = () => {
+    if (promptKey) {
+      localStorage.setItem(promptKey, 'true');
+    }
+    // Force redirect to Home
+    window.location.href = '/';
+  };
+
+  if (user && userData && !userData.isProfileComplete && !promptSeen) {
+    // Automatically flag as "seen" so next logins bypass this screen even if incomplete.
+    if (promptKey) {
+      localStorage.setItem(promptKey, 'true');
+    }
+
     return (
       <div className="min-h-[80vh] flex items-center justify-center p-4">
         <motion.div 
@@ -122,6 +138,14 @@ export default function Login() {
                 </>
               )}
             </button>
+            
+            <button
+              type="button"
+              onClick={handleSkipSetup}
+              className="w-full h-14 border border-slate-200 text-slate-500 rounded-2xl font-bold hover:bg-slate-50 transition-all text-sm"
+            >
+              다음에 설정하기 (홈으로 이동)
+            </button>
           </form>
 
           {error && (
@@ -130,7 +154,7 @@ export default function Login() {
               animate={{ opacity: 1, y: 0 }}
               className="p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3"
             >
-              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+              <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
               <p className="text-xs text-red-600 font-bold">{error}</p>
             </motion.div>
           )}
@@ -140,7 +164,7 @@ export default function Login() {
   }
 
   // Final Redirect
-  if (user && userData?.isProfileComplete) {
+  if (user && (userData?.isProfileComplete || promptSeen)) {
     return <Navigate to="/" replace />;
   }
 
@@ -280,6 +304,8 @@ export default function Login() {
             </div>
           </button>
         </div>
+
+
 
         {error && (
           <motion.div 

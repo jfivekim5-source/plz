@@ -4,6 +4,7 @@ interface UserData {
   uid: string;
   studentId: string;
   name: string;
+  nickname?: string;
   password?: string;
   code?: string;
   role: 'user' | 'admin';
@@ -20,6 +21,7 @@ interface AuthContextType {
   loginWithCode: (code: string) => Promise<void>;
   setupPassword: (password: string) => Promise<void>;
   updateProfileName: (name: string) => Promise<void>;
+  updateProfileNickname: (nickname: string) => Promise<void>;
   togglePrivacy: () => Promise<void>;
   logout: () => void;
 }
@@ -189,6 +191,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(updated);
   };
 
+  const updateProfileNickname = async (newNickname: string) => {
+    if (!userData) throw new Error('세션이 만료되었습니다.');
+    const updated: UserData = {
+      ...userData,
+      nickname: newNickname
+    };
+    setSession(updated);
+  };
+
   const togglePrivacy = async () => {
     if (!userData) throw new Error('세션이 만료되었습니다.');
     const updated: UserData = {
@@ -213,6 +224,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loginWithCode,
       setupPassword,
       updateProfileName,
+      updateProfileNickname,
       togglePrivacy,
       logout
     }}>

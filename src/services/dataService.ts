@@ -69,8 +69,32 @@ const INITIAL_EXAMS: Exam[] = [
     questionCount: 22
   },
   {
+    id: 'exam-english1',
+    title: '영어 I',
+    grade: '고2',
+    subject: '영어',
+    isOpen: true,
+    questionCount: 30
+  },
+  {
     id: 'exam-physics',
     title: '물리학',
+    grade: '고2',
+    subject: '과학',
+    isOpen: true,
+    questionCount: 20
+  },
+  {
+    id: 'exam-earth',
+    title: '지구과학',
+    grade: '고2',
+    subject: '과학',
+    isOpen: true,
+    questionCount: 24
+  },
+  {
+    id: 'exam-chemistry',
+    title: '화학',
     grade: '고2',
     subject: '과학',
     isOpen: true,
@@ -104,7 +128,7 @@ export const ReviewService = {
       return INITIAL_REVIEWS;
     }
   },
-  async addReview(review: { examId: string, userId: string, content: string }) {
+  async addReview(review: { examId: string, userId: string, content: string, nickname?: string }) {
     if (isPlaceholder) {
       const reviews = await this.getReviews();
       const newReview = { ...review, id: `REV-${Date.now()}`, createdAt: new Date().toISOString() };
@@ -128,22 +152,37 @@ export const ExamService = {
   async getExams(): Promise<Exam[]> {
     if (isPlaceholder) {
       const saved = localStorage.getItem(EXAMS_KEY);
-      if (!saved) {
-        localStorage.setItem(EXAMS_KEY, JSON.stringify(INITIAL_EXAMS));
-        return INITIAL_EXAMS;
-      }
-      return JSON.parse(saved);
+      let list = saved ? JSON.parse(saved) : [];
+      if (!Array.isArray(list)) list = [];
+      const mergedList = [...INITIAL_EXAMS];
+      list.forEach((e: any) => {
+        if (!mergedList.some((ie) => ie.id === e.id)) {
+          mergedList.push(e);
+        }
+      });
+      localStorage.setItem(EXAMS_KEY, JSON.stringify(mergedList));
+      return mergedList;
     }
 
     try {
       const snapshot = await getDocs(collection(db!, 'exams'));
-      if (snapshot.empty) {
-        for (const exam of INITIAL_EXAMS) {
-          await setDoc(doc(db!, 'exams', exam.id), exam);
+      const dbExams = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Exam));
+      const mergedList = [...INITIAL_EXAMS];
+      
+      for (const ie of INITIAL_EXAMS) {
+        if (!dbExams.some(e => e.id === ie.id)) {
+          try {
+            await setDoc(doc(db!, 'exams', ie.id), ie);
+          } catch(e){}
         }
-        return INITIAL_EXAMS;
       }
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Exam));
+      
+      dbExams.forEach((e: any) => {
+        if (!mergedList.some((ie) => ie.id === e.id)) {
+          mergedList.push(e);
+        }
+      });
+      return mergedList;
     } catch (error) {
       return INITIAL_EXAMS;
     }
@@ -154,19 +193,45 @@ export const ExamService = {
     return exams.find(e => e.id === examId) || null;
   },
 
+  async addExam(exam: Exam): Promise<void> {
+    if (isPlaceholder) {
+      const exams = await this.getExams();
+      if (!exams.some(e => e.id === exam.id)) {
+        exams.push(exam);
+        localStorage.setItem(EXAMS_KEY, JSON.stringify(exams));
+      }
+      return;
+    }
+
+    try {
+      await setDoc(doc(db!, 'exams', exam.id), exam);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `exams/${exam.id}`);
+    }
+  },
+
   async getQuestions(examId: string): Promise<Question[]> {
+    const exams = await this.getExams();
     const generateMockQuestions = (id: string): Question[] => {
-      const exam = INITIAL_EXAMS.find(e => e.id === id);
+      const exam = exams.find(e => e.id === id);
       if (!exam) return [];
       const seeded: Question[] = [];
       for (let i = 1; i <= exam.questionCount; i++) {
         const isChoice = id === 'exam-speech-lang' ? true :
-                         id === 'exam-algebra' ? i <= 16 :
-                         id === 'exam-physics' ? i <= 15 : true;
-        const score = id === 'exam-speech-lang' ? 3 :
+                         id === 'exam-algebra' ? i <= 15 :
+                         id === 'exam-physics' ? i <= 15 :
+                         id === 'exam-chemistry' ? true :
+                         id === 'exam-earth' ? true :
+                         id === 'exam-english1' ? i <= 24 : true;
+
+        const score = id === 'exam-speech-lang' ? (i <= 20 ? 3 : 5) :
                       id === 'exam-algebra' ? (isChoice ? 4 : 6) :
-                      id === 'exam-physics' ? (isChoice ? 4 : 8) : 4;
-        const answer = isChoice ? ((i % 5) + 1).toString() : (10 + (i * 3) % 90).toString();
+                      id === 'exam-physics' ? (isChoice ? 4 : 8) :
+                      id === 'exam-chemistry' ? 5 :
+                      id === 'exam-earth' ? 4 :
+                      id === 'exam-english1' ? (isChoice ? 3 : 5) : 4;
+
+        const answer = id === 'exam-algebra' ? '1' : (isChoice ? ((i % 5) + 1).toString() : (10 + (i * 3) % 90).toString());
         seeded.push({
           id: `Q-${i}`,
           examId: id,
@@ -180,7 +245,11 @@ export const ExamService = {
     };
 
     if (isPlaceholder) {
-      return generateMockQuestions(examId);
+      const seedList = generateMockQuestions(examId);
+      if (examId === 'exam-algebra') {
+        return seedList.map(q => ({ ...q, answer: '1' }));
+      }
+      return seedList;
     }
     if (!db) return [];
     try {
@@ -197,22 +266,41 @@ export const ExamService = {
         }
         return seedList;
       }
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question));
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question));
+      if (examId === 'exam-algebra') {
+        return list.map(q => ({ ...q, answer: '1' }));
+      }
+      return list;
     } catch (error) {
       console.error('getQuestions failed', error);
-      return generateMockQuestions(examId); // Fallback to memory mock if collection fetch fails
+      const seedList = generateMockQuestions(examId);
+      if (examId === 'exam-algebra') {
+        return seedList.map(q => ({ ...q, answer: '1' }));
+      }
+      return seedList;
     }
   }
 };
 
+const REAL_SUBMISSIONS_KEY = 'exam_app_real_submissions_v3';
+
 export const SubmissionService = {
+  async getRealSubmissions(): Promise<Submission[]> {
+    const saved = localStorage.getItem(REAL_SUBMISSIONS_KEY);
+    return saved ? JSON.parse(saved) : [];
+  },
+
   async submit(submission: Submission) {
     if (isPlaceholder) {
-      const subs = await this.getAllSubmissionsRaw();
-      const filtered = subs.filter(s => !(s.userId === submission.userId && s.examId === submission.examId));
-      const newSub = { ...submission, id: submission.id || `SUB-${Date.now()}-${submission.userId}`, submittedAt: new Date().toISOString() };
+      const reals = await this.getRealSubmissions();
+      const filtered = reals.filter(s => !(s.userId === submission.userId && s.examId === submission.examId));
+      const newSub = { 
+        ...submission, 
+        id: submission.id || `SUB-${Date.now()}-${submission.userId}`, 
+        submittedAt: new Date().toISOString() 
+      };
       filtered.push(newSub);
-      localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify(filtered));
+      localStorage.setItem(REAL_SUBMISSIONS_KEY, JSON.stringify(filtered));
       return;
     }
 
@@ -228,8 +316,8 @@ export const SubmissionService = {
 
   async getMySubmission(examId: string, userId: string): Promise<Submission | null> {
     if (isPlaceholder) {
-      const subs = await this.getAllSubmissionsRaw();
-      return subs.find(s => s.examId === examId && s.userId === userId) || null;
+      const reals = await this.getRealSubmissions();
+      return reals.find(s => s.examId === examId && s.userId === userId) || null;
     }
 
     try {
@@ -243,100 +331,98 @@ export const SubmissionService = {
     }
   },
 
-  async getAllSubmissionsRaw(): Promise<Submission[]> {
-    const saved = localStorage.getItem(SUBMISSIONS_KEY);
-    if (!saved) {
-      // Generate Mock Data for 120 students (Classes 4, 5, 6, 7)
-      const mockSubmissions: Submission[] = [];
-      const classes = [4, 5, 6, 7];
-      const studentsPerClass = 30;
-      const exams = INITIAL_EXAMS;
-
-      classes.forEach(classNum => {
-        for (let i = 1; i <= studentsPerClass; i++) {
-          const studentNum = i.toString().padStart(2, '0');
-          const studentId = `20${classNum}${studentNum}`;
-          
-          exams.forEach(exam => {
-            const mockAnswers = Array.from({ length: exam.questionCount }, (_, idx) => {
-              const qNum = idx + 1;
-              const isChoice = exam.id === 'exam-speech-lang' ? true : 
-                               exam.id === 'exam-algebra' ? qNum <= 16 :
-                               exam.id === 'exam-physics' ? qNum <= 15 : true;
-              
-              const userAnswer = isChoice ? (Math.floor(Math.random() * 5) + 1).toString() : (Math.floor(Math.random() * 999) + 1).toString();
-              return { number: qNum, userAnswer };
-            });
-
-            const ability = Math.random();
-            let totalScore = 0;
-            const detailedAnswers = mockAnswers.map((a, idx) => {
-              const qNum = idx + 1;
-              const isChoice = exam.id === 'exam-speech-lang' ? qNum <= 20 : 
-                               exam.id === 'exam-algebra' ? qNum <= 16 :
-                               exam.id === 'exam-physics' ? qNum <= 15 : true;
-              
-              const weight = exam.id === 'exam-speech-lang' ? (isChoice ? 3 : 5) :
-                             exam.id === 'exam-algebra' ? (isChoice ? 4 : 6) :
-                             exam.id === 'exam-physics' ? (isChoice ? 4 : 8) : 4;
-              
-              const isCorrect = Math.random() < ability;
-              const score = isCorrect ? weight : 0;
-              totalScore += score;
-              
-              return { ...a, isCorrect, score };
-            });
-
-            mockSubmissions.push({
-              id: `SUB-${studentId}-${exam.id}`,
-              userId: studentId,
-              examId: exam.id,
-              answers: detailedAnswers,
-              totalScore,
-              submittedAt: new Date(Date.now() - Math.random() * 86400000).toISOString()
-            });
-          });
-        }
-      });
-
-      localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify(mockSubmissions));
-      return mockSubmissions;
+  generateMockStudentIds(capacity: number): string[] {
+    const pool: string[] = [];
+    for (let c = 1; c <= 14; c++) {
+      for (let s = 1; s <= 30; s++) {
+        const classStr = c.toString().padStart(2, '0');
+        const numStr = s.toString().padStart(2, '0');
+        pool.push(`2${classStr}${numStr}`);
+      }
     }
-    return JSON.parse(saved);
+    // 400명 초과시 뒷번호부터 랜덤으로 삭제되도록 후반부 인덱스에서 무작위 선택하여 제거
+    while (pool.length > capacity) {
+      const startIndex = Math.floor(pool.length * 0.7);
+      const deleteIdx = startIndex + Math.floor(Math.random() * (pool.length - startIndex));
+      pool.splice(deleteIdx, 1);
+    }
+    return pool;
+  },
+
+  generateDummySubmissions(examId: string, capacity: number): Submission[] {
+    const list: Submission[] = [];
+    const studentIds = this.generateMockStudentIds(capacity);
+    for (let i = 0; i < capacity; i++) {
+      const studentId = studentIds[i] || `DUMMY-${examId}-${(i + 1).toString().padStart(4, '0')}`;
+      
+      // 대수(exam-algebra): 0~100점 균등 분포, 나머지: 1~50점 균등 분포
+      const totalScore = examId === 'exam-algebra'
+        ? Math.round((i * 100) / (capacity - 1))
+        : Math.round(1 + ((i * 49) / (capacity - 1)));
+
+      list.push({
+        id: `SUB-${studentId}-${examId}`,
+        userId: studentId,
+        examId: examId,
+        answers: [],
+        totalScore,
+        submittedAt: new Date(Date.now() - Math.random() * 86400000).toISOString()
+      });
+    }
+    return list;
   },
 
   async getAllSubmissions(examId: string): Promise<Submission[]> {
+    let capacity = 100;
+    if (examId === 'exam-speech-lang' || examId === 'exam-algebra' || examId === 'exam-english1') {
+      capacity = 400;
+    } else if (examId === 'exam-physics' || examId === 'exam-earth') {
+      capacity = 200;
+    } else if (examId === 'exam-chemistry') {
+      capacity = 150;
+    }
+
+    const dummyList = this.generateDummySubmissions(examId, capacity);
+
+    let realSubs: Submission[] = [];
     if (!isPlaceholder && db) {
       try {
         const snapshot = await getDocs(collection(db, 'exams', examId, 'submissions'));
         if (!snapshot.empty) {
-          return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Submission));
+          realSubs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Submission));
         }
       } catch (error) {
         console.warn('Firestore fetch failed, falling back to mock data', error);
+        realSubs = await this.getRealSubmissions();
+        realSubs = realSubs.filter(s => s.examId === examId);
       }
+    } else {
+      realSubs = await this.getRealSubmissions();
+      realSubs = realSubs.filter(s => s.examId === examId);
     }
 
-    // Fallback to local mock data
-    const subs = await this.getAllSubmissionsRaw();
-    return subs.filter(s => s.examId === examId);
+    const realCount = realSubs.length;
+    if (realCount > 0) {
+      // 덤이 데이터에서 진짜 제출 수만큼 제외하고 병합하여 전체 capacity가 그대로 유지되도록 합니다.
+      const chosenDummyList = dummyList.slice(0, Math.max(0, capacity - realCount));
+      return [...chosenDummyList, ...realSubs];
+    }
+
+    return dummyList;
+  },
+
+  async getAllSubmissionsRaw(): Promise<Submission[]> {
+    const all: Submission[] = [];
+    const exams = INITIAL_EXAMS;
+    for (const exam of exams) {
+      const subs = await this.getAllSubmissions(exam.id);
+      all.push(...subs);
+    }
+    return all;
   },
 
   async getAllSubmissionsAcrossExams(): Promise<Submission[]> {
-     if (isPlaceholder) return this.getAllSubmissionsRaw();
-     // In Firestore, we would need a collectionGroup or fetch each.
-     // For demo simplicity, we'll just fetch from INITIAL_EXAMS.
-     try {
-       const all: Submission[] = [];
-       const exams = await ExamService.getExams();
-       for (const exam of exams) {
-         const subs = await this.getAllSubmissions(exam.id);
-         all.push(...subs);
-       }
-       return all;
-     } catch (error) {
-       return [];
-     }
+    return this.getAllSubmissionsRaw();
   }
 };
 

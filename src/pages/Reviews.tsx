@@ -10,11 +10,19 @@ export default function Reviews() {
   const [exams, setExams] = useState<any[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>('exam-speech-lang');
   const [reviews, setReviews] = useState<any[]>([]);
+  const [usersMap, setUsersMap] = useState<Record<string, any>>({});
   const [comment, setComment] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadInfo();
+    // Load local storage user entries for live mapping
+    try {
+      const dbStr = localStorage.getItem('exam_app_users_db');
+      if (dbStr) {
+        setUsersMap(JSON.parse(dbStr));
+      }
+    } catch (e) {}
   }, []);
 
   useEffect(() => {
@@ -33,6 +41,24 @@ export default function Reviews() {
     setLoading(false);
   };
 
+  const getReviewerName = (rev: any) => {
+    if (rev.userId && rev.nickname) {
+      return `${rev.userId} ${rev.nickname}`;
+    }
+
+    const userProfile = Object.values(usersMap).find(
+      (u: any) => u.studentId === rev.userId || u.uid === rev.userId
+    ) as any;
+
+    if (userProfile) {
+      const studentId = userProfile.studentId || rev.userId;
+      const nicknameVal = userProfile.nickname || userProfile.name || '';
+      return `${studentId} ${nicknameVal}`;
+    }
+
+    return rev.userId; // fallback
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!comment.trim() || !userData) return;
@@ -40,6 +66,7 @@ export default function Reviews() {
     await ReviewService.addReview({
       examId: selectedExamId,
       userId: userData.studentId,
+      nickname: userData.nickname || userData.name || '',
       content: comment
     });
     setComment('');
@@ -76,26 +103,28 @@ export default function Reviews() {
         {/* Content: Reviews */}
         <div className="lg:col-span-3 space-y-6">
           {/* Post Box */}
-          <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl shadow-slate-100/50 space-y-4">
-            <div className="flex items-center gap-2 text-indigo-600">
-              <MessageSquare size={18} />
-              <h3 className="text-sm font-bold uppercase tracking-widest">후기 남기기</h3>
+          {!userData?.isPrivate && (
+            <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl shadow-slate-100/50 space-y-4">
+              <div className="flex items-center gap-2 text-indigo-600">
+                <MessageSquare size={18} />
+                <h3 className="text-sm font-bold uppercase tracking-widest">후기 남기기</h3>
+              </div>
+              <form onSubmit={handleSubmit} className="relative">
+                <textarea
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder={`${exams.find(e => e.id === selectedExamId)?.title} 시험은 어떠셨나요?`}
+                  className="w-full h-32 p-5 rounded-2xl border border-slate-100 bg-slate-50/50 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-200 transition-all font-medium resize-none"
+                />
+                <button
+                  type="submit"
+                  className="absolute bottom-4 right-4 h-12 px-6 bg-slate-900 text-white rounded-xl font-bold shadow-lg hover:bg-black transition-all active:scale-95 flex items-center gap-2"
+                >
+                  <Send size={16} /> 게시
+                </button>
+              </form>
             </div>
-            <form onSubmit={handleSubmit} className="relative">
-              <textarea
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder={`${exams.find(e => e.id === selectedExamId)?.title} 시험은 어떠셨나요?`}
-                className="w-full h-32 p-5 rounded-2xl border border-slate-100 bg-slate-50/50 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-200 transition-all font-medium resize-none"
-              />
-              <button
-                type="submit"
-                className="absolute bottom-4 right-4 h-12 px-6 bg-slate-900 text-white rounded-xl font-bold shadow-lg hover:bg-black transition-all active:scale-95 flex items-center gap-2"
-              >
-                <Send size={16} /> 게시
-              </button>
-            </form>
-          </div>
+          )}
 
           {/* List */}
           <div className="space-y-4">
@@ -113,7 +142,7 @@ export default function Reviews() {
                       <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400">
                         <User size={14} />
                       </div>
-                      <span className="text-sm font-bold text-slate-900">{rev.userId}</span>
+                      <span className="text-sm font-bold text-slate-900">{getReviewerName(rev)}</span>
                       <span className="text-[10px] text-slate-400 font-medium">· {new Date(rev.createdAt).toLocaleDateString()}</span>
                     </div>
                   </div>

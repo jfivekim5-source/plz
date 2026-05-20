@@ -5,22 +5,26 @@ import { User, Shield, Key, Eye, EyeOff, Check, ArrowRight } from 'lucide-react'
 import { cn } from '@/src/lib/utils';
 
 export default function Settings() {
-  const { userData, updateProfileName, setupPassword, togglePrivacy } = useAuth();
-  const [newName, setNewName] = useState(userData?.name || '');
+  const { userData, updateProfileNickname, setupPassword, togglePrivacy } = useAuth();
+  const [nickname, setNickname] = useState(userData?.nickname || userData?.name || '');
   const [newPass, setNewPass] = useState('');
   const [showValues, setShowValues] = useState(false);
-  const [savedName, setSavedName] = useState(false);
+  const [savedNickname, setSavedNickname] = useState(false);
   const [savedPass, setSavedPass] = useState(false);
 
-  const handleUpdateName = async (e: React.FormEvent) => {
+  const handleUpdateNickname = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim()) return;
+    if (!nickname.trim()) return;
+    if (nickname.trim().length > 10) {
+      alert('닉네임은 최대 10글자까지 설정 가능합니다.');
+      return;
+    }
     try {
-      await updateProfileName(newName);
-      setSavedName(true);
-      setTimeout(() => setSavedName(false), 2000);
+      await updateProfileNickname(nickname.trim());
+      setSavedNickname(true);
+      setTimeout(() => setSavedNickname(false), 2000);
     } catch (err) {
-      alert('이름 변경에 실패했습니다.');
+      alert('닉네임 변경에 실패했습니다.');
     }
   };
 
@@ -54,20 +58,21 @@ export default function Settings() {
           </div>
           <div className="flex-1 space-y-3">
             <div className="space-y-1">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">성명 설정</span>
-              <form onSubmit={handleUpdateName} className="flex gap-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">닉네임 설정 (최대 10자)</span>
+              <form onSubmit={handleUpdateNickname} className="flex gap-2">
                 <input
                   type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="flex-1 h-12 px-4 rounded-xl border border-slate-100 bg-slate-50 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all font-bold"
-                  placeholder="이름 입력"
+                  maxLength={10}
+                  value={nickname}
+                  onChange={(e) => setNickname(e.target.value)}
+                  className="flex-1 h-12 px-4 rounded-xl border border-slate-100 bg-slate-50 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all font-bold text-sm"
+                  placeholder="닉네임 입력 (최대 10자)"
                 />
                 <button
                   type="submit"
-                  className="h-12 px-5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center gap-2 active:scale-95"
+                  className="h-12 px-5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center gap-2 active:scale-95 text-sm"
                 >
-                  {savedName ? <Check size={16} /> : '변경'}
+                  {savedNickname ? <Check size={16} /> : '변경'}
                 </button>
               </form>
             </div>

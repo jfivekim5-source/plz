@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { GraduationCap, ArrowRight, Search, Filter } from 'lucide-react';
 import { Exam } from '@/src/types';
 import { ExamService } from '@/src/services/dataService';
+import { useAuth } from '@/src/contexts/AuthContext';
 
 export default function ExamList() {
+  const { user } = useAuth();
   const [exams, setExams] = useState<Exam[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -29,8 +31,15 @@ export default function ExamList() {
         setLoading(false);
       }
     }
-    loadExams();
-  }, []);
+    if (user) {
+      loadExams();
+    }
+  }, [user]);
+
+  // Restrict guest access
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
 
   return (
     <div className="space-y-8">

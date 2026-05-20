@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
-import { Users, BookOpen, FileText, Plus, CheckCircle, Search, Key, ShieldCheck, User } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Users, BookOpen, FileText, Plus, CheckCircle, Search, Key, ShieldCheck, User, X } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { SubmissionService, GradeCalculator } from '@/src/services/dataService';
+import { SubmissionService, GradeCalculator, ExamService } from '@/src/services/dataService';
 
 export default function Admin() {
   const { userData } = useAuth();
@@ -11,18 +11,26 @@ export default function Admin() {
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>('exam-speech-lang');
+  const [exams, setExams] = useState<any[]>([]);
 
-  const exams = [
-    { id: 'exam-speech-lang', title: '화법과 언어' },
-    { id: 'exam-algebra', title: '대수' },
-    { id: 'exam-physics', title: '물리학' },
-  ];
+  // Add Subject states
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newSubject, setNewSubject] = useState('국어');
+  const [newGrade, setNewGrade] = useState('고2');
+  const [newQuestionCount, setNewQuestionCount] = useState(20);
 
   useEffect(() => {
     loadData();
   }, [activeTab]);
 
   const loadData = async () => {
+    const list = await ExamService.getExams();
+    setExams(list);
+    if (list.length > 0 && !list.some(e => e.id === selectedExamId)) {
+      setSelectedExamId(list[0].id);
+    }
+
     const subs = await SubmissionService.getAllSubmissionsRaw();
     setSubmissions(subs.sort((a: any, b: any) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()));
 
@@ -31,6 +39,25 @@ export default function Admin() {
       const parsed = JSON.parse(usersDb);
       setAllUsers(Object.values(parsed));
     }
+  };
+
+  const handleAddExam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim()) return;
+    const cleanId = `exam-${Date.now()}`;
+    const newExam = {
+      id: cleanId,
+      title: newTitle,
+      grade: newGrade,
+      subject: newSubject,
+      isOpen: true,
+      questionCount: Number(newQuestionCount) || 20
+    };
+    await ExamService.addExam(newExam);
+    setNewTitle('');
+    setShowAddModal(false);
+    await loadData();
+    setSelectedExamId(cleanId);
   };
 
   const getRankedSubmissions = () => {
@@ -96,19 +123,19 @@ export default function Admin() {
         <div className="flex flex-wrap gap-2">
           {exams.map(exam => (
             <button
-              key={exam.id}
-              onClick={() => setSelectedExamId(exam.id)}
-              className={cn(
-                "px-4 h-10 rounded-xl text-xs font-bold border transition-all",
-                selectedExamId === exam.id 
-                  ? "bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100" 
-                  : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
-              )}
+               key={exam.id}
+               onClick={() => setSelectedExamId(exam.id)}
+               className={cn(
+                 "px-4 h-10 rounded-xl text-xs font-bold border transition-all cursor-pointer",
+                 selectedExamId === exam.id 
+                   ? "bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100" 
+                   : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+               )}
             >
-              {exam.title}
+               {exam.title}
             </button>
           ))}
-          <button onClick={loadData} className="w-10 h-10 bg-slate-900 text-white rounded-xl flex items-center justify-center hover:bg-black transition-all shadow-lg shadow-slate-200">
+          <button onClick={() => setShowAddModal(true)} className="w-10 h-10 bg-slate-900 hover:bg-slate-800 text-white rounded-xl flex items-center justify-center transition-all shadow-lg shadow-slate-200 cursor-pointer">
              <Plus size={18} />
           </button>
         </div>
@@ -314,6 +341,120 @@ export default function Admin() {
           </table>
         </div>
       )}
+      {/* Dynamic Animated Modal for adding Exam */}
+      <AnimatePresence>
+        {showAddModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowAddModal(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            {/* Modal Body */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="relative w-full max-w-md bg-white border border-slate-250 p-8 rounded-[36px] shadow-2xl space-y-6 z-10"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                    <BookOpen size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-slate-900">새 과목/시험 개설</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Add New Exam Subject</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddExam} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">과목명 (예: 경제, 기하)</label>
+                  <input
+                    type="text"
+                    required
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder="과목명을 입력하세요 (예: 심화 수학)"
+                    className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all font-semibold"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">학년</label>
+                    <select
+                      value={newGrade}
+                      onChange={(e) => setNewGrade(e.target.value)}
+                      className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:outline-none bg-white font-semibold text-slate-700"
+                    >
+                      <option value="고1">고1</option>
+                      <option value="고2">고2</option>
+                      <option value="고3">고3</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">대분류 계열</label>
+                    <select
+                      value={newSubject}
+                      onChange={(e) => setNewSubject(e.target.value)}
+                      className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:outline-none bg-white font-semibold text-slate-700"
+                    >
+                      <option value="국어">국어</option>
+                      <option value="수학">수학</option>
+                      <option value="영어">영어</option>
+                      <option value="과학">과학</option>
+                      <option value="사회">사회</option>
+                      <option value="예체능">예체능</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">총 문항 수</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    required
+                    value={newQuestionCount}
+                    onChange={(e) => setNewQuestionCount(Number(e.target.value) || 20)}
+                    className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:outline-none font-semibold text-slate-700"
+                  />
+                </div>
+
+                <div className="pt-4 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(false)}
+                    className="flex-1 h-12 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-2xl font-bold transition-all text-sm cursor-pointer"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 h-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold transition-all text-sm shadow-lg shadow-indigo-150-all cursor-pointer"
+                  >
+                    등록 및 개설
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

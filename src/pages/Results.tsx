@@ -22,12 +22,22 @@ export default function Results() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [allSubmissions, setAllSubmissions] = useState<Submission[]>([]);
+  const [usersMap, setUsersMap] = useState<Record<string, any>>({});
   const [showRankings, setShowRankings] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const { user } = useAuth();
+  const { user, userData } = useAuth();
   const searchUserId = searchParams.get('userId');
   const effectiveUserId = user?.uid || searchUserId;
+
+  let capacity = 100;
+  if (examId === 'exam-speech-lang' || examId === 'exam-algebra' || examId === 'exam-english1') {
+    capacity = 400;
+  } else if (examId === 'exam-physics' || examId === 'exam-earth') {
+    capacity = 200;
+  } else if (examId === 'exam-chemistry') {
+    capacity = 150;
+  }
 
   useEffect(() => {
     async function loadResults() {
@@ -46,6 +56,12 @@ export default function Results() {
           const computedStats = GradeCalculator.getStats(sub.totalScore, allSubs);
           setStats(computedStats);
         }
+
+        // Load internal users DB for detailed nickname mappings
+        const dbStr = localStorage.getItem('exam_app_users_db');
+        if (dbStr) {
+          setUsersMap(JSON.parse(dbStr));
+        }
       } catch (err) {
         console.error(err);
       } finally {
@@ -59,6 +75,14 @@ export default function Results() {
   if (loading) return <div className="p-12 text-center text-slate-400">결과를 집계하고 있습니다...</div>;
   if (!submission) return <div className="p-12 text-center text-slate-400">결과를 찾을 수 없습니다.</div>;
 
+  const getDisplayName = (id: string) => {
+    // Realistic academic IDs (e.g. 20101 to 21430) are returned directly
+    if (/^2\d{4}$/.test(id)) {
+      return id;
+    }
+    return 'Unknown';
+  };
+
   const correctCount = (submission.answers || []).filter(a => a.isCorrect).length;
 
   const rankedList = allSubmissions
@@ -68,8 +92,19 @@ export default function Results() {
       return { ...s, rank: i + 1, displayName };
     });
 
+  const isStatsVisible = true;
+  const isRankVisible = true;
+
   return (
     <div className="max-w-5xl mx-auto space-y-12">
+      {/* Title Header */}
+      <div className="space-y-1 border-b border-slate-100 pb-6">
+        <h1 className="text-3xl font-black text-slate-900 tracking-tight">
+          Unknown의 성적표
+        </h1>
+        <p className="text-sm font-semibold text-slate-400">실시간 가채점 및 상세 예측 등수 리포트</p>
+      </div>
+
       {/* Header Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
         {/* Main Score Card */}
@@ -81,7 +116,7 @@ export default function Results() {
           </div>
           <div className="space-y-1">
             <p className="text-indigo-100 font-bold uppercase tracking-widest text-xs">나의 점수</p>
-            <h2 className="text-7xl font-black">{submission.totalScore}</h2>
+            <h2 className="text-7xl font-black">{submission.totalScore}점</h2>
           </div>
           <p className="text-indigo-100/80 text-sm font-medium">
             {submission.answers.length}문항 중 {correctCount}문항 정답
@@ -97,7 +132,13 @@ export default function Results() {
               <TrendingUp size={24} />
             </div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">예상 등급</p>
-            <h3 className="text-5xl font-black text-slate-900">{stats?.grade || '-'}<span className="text-2xl ml-1 text-slate-400">등급</span></h3>
+            <h3 className="text-5xl font-black text-slate-900">
+              {isStatsVisible ? (
+                <>{stats?.grade || '-'}<span className="text-2xl ml-1 text-slate-400">등급</span></>
+              ) : (
+                <span className="text-2xl text-slate-400">정산중</span>
+              )}
+            </h3>
           </div>
 
           <div className="w-px h-24 bg-slate-100 hidden md:block"></div>
@@ -107,7 +148,13 @@ export default function Results() {
               <Users size={24} />
             </div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">상위 비율</p>
-            <h3 className="text-5xl font-black text-slate-900">{stats?.percentile || '-'}<span className="text-2xl ml-1 text-slate-400">%</span></h3>
+            <h3 className="text-5xl font-black text-slate-900">
+              {isStatsVisible ? (
+                <>{stats?.percentile || '-'}<span className="text-2xl ml-1 text-slate-400">%</span></>
+              ) : (
+                <span className="text-2xl text-slate-400">정산중</span>
+              )}
+            </h3>
           </div>
 
           <div className="w-px h-24 bg-slate-100 hidden md:block"></div>
@@ -120,7 +167,17 @@ export default function Results() {
               <BarChart size={24} />
             </div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest group-hover:text-amber-600 transition-colors">예상 순위 (클릭)</p>
-            <h3 className="text-5xl font-black text-slate-900">{stats?.rank || '-'}<span className="text-2xl ml-1 text-slate-400">/ {stats?.totalParticipants || 0}위</span></h3>
+            <h3 className="text-5xl font-black text-slate-900">
+              {isStatsVisible ? (
+                isRankVisible ? (
+                  <>{stats?.rank || '-'}<span className="text-2xl ml-1 text-slate-400">/ {stats?.totalParticipants || 0}위</span></>
+                ) : (
+                  <span className="text-2xl text-slate-400">비공개</span>
+                )
+              ) : (
+                <span className="text-2xl text-slate-400">정산중</span>
+              )}
+            </h3>
           </button>
         </div>
       </div>
@@ -165,32 +222,32 @@ export default function Results() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {rankedList.map((rankSub) => (
-                  <tr 
-                    key={rankSub.id} 
-                    className={cn(
-                      "hover:bg-slate-50/50 transition-colors",
-                      rankSub.userId === effectiveUserId && "bg-indigo-50/50"
-                    )}
-                  >
-                    <td className="px-8 py-4">
-                      <div className={cn(
-                        "w-8 h-8 rounded-full flex items-center justify-center font-black text-xs",
-                        rankSub.rank === 1 ? "bg-amber-400 text-white" : 
-                        rankSub.rank === 2 ? "bg-slate-300 text-white" :
-                        rankSub.rank === 3 ? "bg-orange-300 text-white" : "text-slate-400 bg-slate-50"
-                      )}>
-                        {rankSub.rank}
-                      </div>
-                    </td>
-                    <td className="px-8 py-4 font-bold text-slate-900">
-                      {rankSub.displayName} {rankSub.userId === effectiveUserId && "(나)"}
-                    </td>
-                    <td className="px-8 py-4 font-black text-indigo-600">{rankSub.totalScore}점</td>
-                    <td className="px-8 py-4 text-right text-xs text-slate-400">
-                      {new Date(rankSub.submittedAt).toLocaleTimeString()}
-                    </td>
-                  </tr>
-                ))}
+                    <tr 
+                      key={rankSub.id} 
+                      className={cn(
+                        "hover:bg-slate-50/50 transition-colors",
+                        rankSub.userId === effectiveUserId && "bg-indigo-50/50"
+                      )}
+                    >
+                      <td className="px-8 py-4">
+                        <div className={cn(
+                          "w-8 h-8 rounded-full flex items-center justify-center font-black text-xs",
+                          rankSub.rank === 1 ? "bg-amber-400 text-white" : 
+                          rankSub.rank === 2 ? "bg-slate-300 text-white" :
+                          rankSub.rank === 3 ? "bg-orange-300 text-white" : "text-slate-400 bg-slate-50"
+                        )}>
+                          {rankSub.rank}
+                        </div>
+                      </td>
+                      <td className="px-8 py-4 font-bold text-slate-900">
+                        {getDisplayName(rankSub.userId)} {rankSub.userId === effectiveUserId && "(나)"}
+                      </td>
+                      <td className="px-8 py-4 font-black text-indigo-600">{rankSub.totalScore}점</td>
+                      <td className="px-8 py-4 text-right text-xs text-slate-400">
+                        {new Date(rankSub.submittedAt).toLocaleTimeString()}
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
@@ -237,11 +294,6 @@ export default function Results() {
                 ))}
               </tbody>
             </table>
-            <div className="p-8 bg-slate-50 border-t border-slate-100 text-center">
-               <p className="text-sm text-slate-500">
-                 * 예상 등급은 현재 입력된 표본({stats?.totalParticipants || 0}건)을 기반으로 하며 실시간으로 변동될 수 있습니다.
-               </p>
-            </div>
           </div>
         )}
       </section>
