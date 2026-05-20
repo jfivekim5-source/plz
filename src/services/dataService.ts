@@ -155,14 +155,52 @@ export const ExamService = {
   },
 
   async getQuestions(examId: string): Promise<Question[]> {
-    if (isPlaceholder) return [];
+    const generateMockQuestions = (id: string): Question[] => {
+      const exam = INITIAL_EXAMS.find(e => e.id === id);
+      if (!exam) return [];
+      const seeded: Question[] = [];
+      for (let i = 1; i <= exam.questionCount; i++) {
+        const isChoice = id === 'exam-speech-lang' ? true :
+                         id === 'exam-algebra' ? i <= 16 :
+                         id === 'exam-physics' ? i <= 15 : true;
+        const score = id === 'exam-speech-lang' ? 3 :
+                      id === 'exam-algebra' ? (isChoice ? 4 : 6) :
+                      id === 'exam-physics' ? (isChoice ? 4 : 8) : 4;
+        const answer = isChoice ? ((i % 5) + 1).toString() : (10 + (i * 3) % 90).toString();
+        seeded.push({
+          id: `Q-${i}`,
+          examId: id,
+          number: i,
+          answer,
+          score,
+          type: isChoice ? 'multiple' : 'subjective'
+        });
+      }
+      return seeded;
+    };
+
+    if (isPlaceholder) {
+      return generateMockQuestions(examId);
+    }
     if (!db) return [];
     try {
       const snapshot = await getDocs(collection(db, 'exams', examId, 'questions'));
+      if (snapshot.empty) {
+        // Automatically seed questions into Firebase for this exam
+        const seedList = generateMockQuestions(examId);
+        for (const q of seedList) {
+          try {
+            await setDoc(doc(db, 'exams', examId, 'questions', q.id), q);
+          } catch (seedErr) {
+            console.error(`Failed to write seeded question Q-${q.number} for ${examId}:`, seedErr);
+          }
+        }
+        return seedList;
+      }
       return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question));
     } catch (error) {
       console.error('getQuestions failed', error);
-      return [];
+      return generateMockQuestions(examId); // Fallback to memory mock if collection fetch fails
     }
   }
 };

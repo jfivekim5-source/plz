@@ -59,12 +59,12 @@ export default function Results() {
   if (loading) return <div className="p-12 text-center text-slate-400">결과를 집계하고 있습니다...</div>;
   if (!submission) return <div className="p-12 text-center text-slate-400">결과를 찾을 수 없습니다.</div>;
 
-  const correctCount = submission.answers.filter(a => a.isCorrect).length;
+  const correctCount = (submission.answers || []).filter(a => a.isCorrect).length;
 
   const rankedList = allSubmissions
-    .sort((a, b) => b.totalScore - a.totalScore)
+    .sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0))
     .map((s, i) => {
-      const displayName = s.userId.startsWith('GUEST-') ? '게스트' : s.userId;
+      const displayName = (s.userId && s.userId.startsWith('GUEST-')) ? '게스트' : (s.userId || '알 수 없음');
       return { ...s, rank: i + 1, displayName };
     });
 
