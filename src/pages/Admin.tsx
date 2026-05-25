@@ -35,12 +35,14 @@ export default function Admin() {
 
   // Diagnostic modal state for student's answers
   const [selectedSubForDiagnostic, setSelectedSubForDiagnostic] = useState<Submission | null>(null);
+  const [selectedDotSub, setSelectedDotSub] = useState<any | null>(null);
 
   useEffect(() => {
     loadData();
   }, [activeTab]);
 
   useEffect(() => {
+    setSelectedDotSub(null);
     async function loadQs() {
       if (!selectedExamId) return;
       try {
@@ -449,16 +451,49 @@ export default function Admin() {
                   </span>
                 </div>
 
-                <div className="space-y-1">
-                  <span className="text-[10px] text-slate-400 font-bold block">정답 입력</span>
+                <div className="space-y-2">
+                  <span className="text-[10px] text-slate-400 font-bold block">정답 입력/수정</span>
                   
-                  <input
-                    type="text"
-                    value={q.answer}
-                    onChange={(e) => handleUpdateAnswer(q.number, e.target.value)}
-                    placeholder={q.type === 'multiple' ? '예: 1, 2, 3 등' : '배점 입력'}
-                    className="w-full h-10 px-3 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none"
-                  />
+                  {q.type === 'multiple' ? (
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {['1', '2', '3', '4', '5'].map((choice) => {
+                        const selectedList = (q.answer || '').split(',').filter(Boolean);
+                        const isPressed = selectedList.includes(choice);
+                        
+                        return (
+                          <button
+                            key={`admin-choice-${q.number}-${choice}`}
+                            type="button"
+                            onClick={() => {
+                              let nextList: string[];
+                              if (selectedList.includes(choice)) {
+                                nextList = selectedList.filter(v => v !== choice);
+                              } else {
+                                nextList = [...selectedList, choice].sort((a, b) => Number(a) - Number(b));
+                              }
+                              handleUpdateAnswer(q.number, nextList.join(','));
+                            }}
+                            className={cn(
+                              "h-10 rounded-xl flex items-center justify-center font-bold text-xs transition-all border-2",
+                              isPressed 
+                                ? "bg-slate-900 border-slate-900 text-white scale-105 shadow" 
+                                : "bg-white border-slate-200 text-slate-400 hover:border-indigo-300 hover:text-indigo-600"
+                            )}
+                          >
+                            {choice}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      value={q.answer}
+                      onChange={(e) => handleUpdateAnswer(q.number, e.target.value)}
+                      placeholder="배점 입력"
+                      className="w-full h-10 px-3 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none"
+                    />
+                  )}
                 </div>
               </div>
             ))}
@@ -487,49 +522,151 @@ export default function Admin() {
             </div>
           </div>
 
-          {/* SVG distribution */}
+          {/* Interactive Dot-Plot score distribution (Removing Gaussian Trendline as requested) */}
           <div className="space-y-4">
-            <h4 className="text-sm font-extrabold text-slate-800">동향 점수대 분포 밴드 및 가우시안 추세선</h4>
-            <div className="relative w-full aspect-[2/1] bg-slate-50 border border-slate-100 rounded-2xl p-6 flex flex-col justify-end">
-              <svg className="absolute inset-0 w-full h-full p-6 overflow-visible" xmlns="http://www.w3.org/2000/svg">
-                <line x1="0%" y1="20%" x2="100%" y2="20%" stroke="#e2e8f0" strokeWidth="1" />
-                <line x1="0%" y1="50%" x2="100%" y2="50%" stroke="#e2e8f0" strokeWidth="1" />
-                <line x1="0%" y1="80%" x2="100%" y2="80%" stroke="#e2e8f0" strokeWidth="1" />
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-extrabold text-slate-800">실시간 수강생 개별 표본 성적 분포 현황 (도트 차트)</h4>
+              <span className="text-[11px] text-indigo-600 font-extrabold bg-indigo-50 px-3 py-1 rounded-full">
+                실시간 분석 표본: {currentRanked.filter(s => !s.isDummy).length}명
+              </span>
+            </div>
+            
+            <p className="text-xs text-slate-400 font-semibold leading-relaxed">
+              * 아래 도트(점)는 실제 제출한 개별 수강생을 나타냅니다. <strong>도트를 클릭하면 수강생 정보와 상세 취득 점수를 조회</strong>할 수 있습니다.
+            </p>
 
-                {buckets.map((b, idx) => {
-                  const spacing = 100 / buckets.length;
-                  const xOffset = `${spacing * idx + (spacing / 5)}%`;
-                  const heightPercent = `${(b.count / maxBucketCount) * 80}%`;
-
+            <div className="relative w-full h-64 bg-slate-50 border border-slate-150 rounded-[32px] p-8 flex flex-col justify-end select-none overflow-hidden">
+              {/* Score axes vertical grid lines */}
+              <div className="absolute inset-x-0 top-0 bottom-12 pointer-events-none">
+                {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((v) => {
+                  const leftPercent = 4 + (v * 0.92);
                   return (
-                    <rect
-                      key={idx}
-                      x={xOffset}
-                      y={`${100 - Number(heightPercent.replace('%', ''))}%`}
-                      width="45px"
-                      height={heightPercent}
-                      fill="#6366f1"
-                      opacity="0.15"
-                      rx="4"
-                    />
+                    <div 
+                      key={`grid-${v}`} 
+                      style={{ left: `${leftPercent}%` }}
+                      className="absolute top-8 bottom-0 border-l border-slate-200/80 border-dashed"
+                    >
+                      <span className="absolute -bottom-6 -translate-x-1/2 text-[10px] font-mono font-black text-slate-400">
+                        {v}점
+                      </span>
+                    </div>
                   );
                 })}
+              </div>
 
-                <path
-                  d="M 15 160 Q 150 20, 320 60 T 600 170"
-                  fill="none"
-                  stroke="#4f46e5"
-                  strokeWidth="3.5"
-                  strokeDasharray="4 4"
-                />
-              </svg>
+              {/* Individual Dot Plot Stage */}
+              <div className="absolute inset-0 pt-8 pb-12 px-[4%] overflow-y-auto no-scrollbar">
+                {(() => {
+                  const realSubmissionsForDots = currentRanked.filter(s => !s.isDummy);
+                  
+                  if (realSubmissionsForDots.length === 0) {
+                    return (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-400">
+                        <span className="text-sm font-extrabold">조회 대상 실시간 제출 표본이 없습니다.</span>
+                        <span className="text-[11px] mt-1 text-slate-350">수강생 계정으로 로그인하여 퀴즈 제출을 완료해 주세요.</span>
+                      </div>
+                    );
+                  }
 
-              <div className="w-full flex justify-between text-[11px] font-bold text-slate-400 mt-2 z-10 px-4">
-                {buckets.map((b) => (
-                  <span key={b.label} className="text-center w-12">{b.label}</span>
-                ))}
+                  // Group by score so identical scores are stacked vertically
+                  const dotScoreGroups: Record<number, any[]> = {};
+                  realSubmissionsForDots.forEach((sub) => {
+                    const score = sub.totalScore || 0;
+                    if (!dotScoreGroups[score]) {
+                      dotScoreGroups[score] = [];
+                    }
+                    dotScoreGroups[score].push(sub);
+                  });
+
+                  return Object.entries(dotScoreGroups).map(([scoreStr, subs]) => {
+                    const score = Number(scoreStr);
+                    const leftPercent = 4 + (score * 0.92);
+                    
+                    return subs.map((sub, idx) => {
+                      const isSelected = selectedDotSub?.userId === sub.userId && selectedDotSub?.examId === sub.examId;
+                      const bottomOffset = 36 + (idx * 22); // dynamic vertical stack layout
+                      
+                      let dotColor = 'bg-slate-400 hover:bg-slate-500';
+                      if (score >= 90) dotColor = 'bg-rose-500 hover:bg-rose-600';
+                      else if (score >= 80) dotColor = 'bg-indigo-600 hover:bg-indigo-700';
+                      else if (score >= 60) dotColor = 'bg-emerald-500 hover:bg-emerald-600';
+                      else if (score >= 40) dotColor = 'bg-amber-500 hover:bg-amber-600';
+
+                      return (
+                        <button
+                          key={`dot-${sub.userId}-${idx}`}
+                          type="button"
+                          style={{ 
+                            left: `${leftPercent}%`, 
+                            bottom: `${bottomOffset}px`,
+                            transform: 'translateX(-50%)'
+                          }}
+                          onClick={() => setSelectedDotSub(sub)}
+                          className={cn(
+                            "absolute w-5.5 h-5.5 rounded-full border-2 border-white cursor-pointer transition-all flex items-center justify-center shadow shadow-slate-200 hover:scale-130 active:scale-95",
+                            dotColor,
+                            isSelected ? "ring-2 ring-indigo-600 ring-offset-2 scale-130 z-30 font-black" : "z-10"
+                          )}
+                        >
+                          {isSelected && <span className="w-1.5 h-1.5 bg-white rounded-full" />}
+                        </button>
+                      );
+                    });
+                  });
+                })()}
               </div>
             </div>
+
+            {/* Clicked Individual Student Detail Context Card (Admin only details) */}
+            <AnimatePresence mode="wait">
+              {selectedDotSub && (
+                <motion.div
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  className="bg-indigo-50/50 border border-indigo-150 rounded-3xl p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-6"
+                >
+                  <div className="space-y-2">
+                    <div className="inline-flex px-3 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] font-black rounded-full uppercase tracking-wider">
+                      실시간 표본 상세 조회 (관리자 전용)
+                    </div>
+                    
+                    {(() => {
+                      const userProfile = allUsers.find(u => u.uid === selectedDotSub.userId);
+                      const realName = userProfile?.name || '설정 전 수강생';
+                      const studentIdNum = userProfile?.studentId || selectedDotSub.userId;
+                      const hasPrivate = userProfile?.isPrivate ? ' (비공개 처리 수강생)' : '';
+                      
+                      return (
+                        <div className="flex items-center gap-3">
+                          <h5 className="text-lg font-black text-slate-900">
+                            이름: <span className="text-indigo-700">{realName}</span>
+                          </h5>
+                          <span className="text-xs text-slate-350 font-bold">|</span>
+                          <span className="text-base font-mono font-bold text-slate-600">
+                            학번/ID: <span className="text-slate-900 font-extrabold">{studentIdNum}</span>{hasPrivate}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                    
+                    <p className="text-xs text-slate-400 font-bold">
+                      제출 일시: {new Date(selectedDotSub.submittedAt).toLocaleString('ko-KR')} | 총 수량: {selectedDotSub.answers?.length || 0}개 응답 완료
+                    </p>
+                  </div>
+                  
+                  <div className="flex flex-row items-center gap-4 shrink-0 bg-white border border-indigo-100 px-6 py-4 rounded-2xl shadow-sm">
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 font-bold block">획득 종합 점수</span>
+                      <span className="text-2xl font-black text-indigo-650 font-sans">{selectedDotSub.totalScore || 0}점</span>
+                    </div>
+                    <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center font-black text-sm">
+                      {selectedDotSub.rank}등
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">

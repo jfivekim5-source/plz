@@ -286,19 +286,13 @@ export default function ExamInput() {
                   });
                 }}
                 className={cn(
-                  "min-w-10 h-10 px-2 rounded-xl text-xs font-bold transition-all border flex flex-col items-center justify-center gap-0.5",
+                  "w-10 h-10 rounded-xl text-xs font-black transition-all border flex items-center justify-center shrink-0",
                   isUnknown 
-                    ? "bg-rose-50 border-rose-200 text-rose-600 scale-105 shadow-sm" 
+                    ? "bg-rose-500 border-rose-500 text-white scale-105 shadow-md shadow-rose-100" 
                     : "bg-slate-50 border-slate-150 text-slate-600 hover:border-slate-300"
                 )}
               >
                 <span>{qNum}</span>
-                <span className={cn(
-                  "text-[8px] font-black uppercase tracking-tighter",
-                  isUnknown ? "text-rose-500" : "text-slate-300"
-                )}>
-                  {isUnknown ? '모름' : '선택'}
-                </span>
               </button>
             );
           })}
