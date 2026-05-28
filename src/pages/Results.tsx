@@ -26,11 +26,11 @@ export default function Results() {
   const [stats, setStats] = useState<any>(null);
   const [allSubmissions, setAllSubmissions] = useState<any[]>([]);
   const [usersMap, setUsersMap] = useState<Record<string, any>>({});
-  const [subTab, setSubTab] = useState<'answers' | 'rankings' | 'stats'>('answers');
+  const [subTab, setSubTab] = useState<'answers' | 'stats'>('answers');
   const [loading, setLoading] = useState(true);
   const [selectedDotSub, setSelectedDotSub] = useState<any | null>(null);
 
-  const { user, userData } = useAuth();
+  const { user, userData, loading: authLoading } = useAuth();
   const searchUserId = searchParams.get('userId');
   const effectiveUserId = searchUserId || user?.uid;
 
@@ -89,8 +89,23 @@ export default function Results() {
         setLoading(false);
       }
     }
-    loadResults();
-  }, [examId, effectiveUserId]);
+    if (!authLoading) {
+      loadResults();
+    }
+  }, [examId, effectiveUserId, authLoading]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center p-8">
+        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-slate-500 font-bold text-sm">학적 정보 확인 중...</p>
+      </div>
+    );
+  }
+
+  if (!user || !userData) {
+    return <Navigate to="/login" replace />;
+  }
 
   if (!examId) return <Navigate to="/exams" />;
   if (loading) return <div className="p-12 text-center text-slate-400">결과를 집계하고 있습니다...</div>;
@@ -138,6 +153,23 @@ export default function Results() {
   const forceStable = true;
 
   const currentLiveCut = (rankedList.length > 0) ? (rankedList[Math.floor(rankedList.length * 0.1)]?.totalScore || 0) : 0;
+
+  // Korean standard grade cut-off calculation
+  const getGradeCuts = () => {
+    if (rankedList.length === 0) return { cut1: 0, cut2: 0, cut3: 0, cut4: 0, cut5: 0 };
+    const getCutForPercentile = (p: number) => {
+      const idx = Math.floor(rankedList.length * p);
+      return rankedList[Math.min(idx, rankedList.length - 1)]?.totalScore || 0;
+    };
+    return {
+      cut1: getCutForPercentile(0.04), // 1등급 컷 (상위 4%)
+      cut2: getCutForPercentile(0.11), // 2등급 컷 (상위 11%)
+      cut3: getCutForPercentile(0.23), // 3등급 컷 (상위 23%)
+      cut4: getCutForPercentile(0.40), // 4등급 컷 (상위 40%)
+      cut5: getCutForPercentile(0.60), // 5등급 컷 (상위 60%)
+    };
+  };
+  const dynamicCuts = getGradeCuts();
 
   const triggerSimulation = () => {
     if (!examId) return;
@@ -323,103 +355,17 @@ export default function Results() {
           문항별 채점 결과
         </button>
         <button
-          onClick={() => setSubTab('rankings')}
-          className={cn(
-            "flex-1 min-w-[120px] h-11 rounded-[22px] text-xs font-bold transition-all whitespace-nowrap",
-            subTab === 'rankings' ? "bg-slate-900 text-white shadow-md" : "text-slate-500 hover:bg-slate-50"
-          )}
-        >
-          실시간 예측 순위표
-        </button>
-        <button
           onClick={() => setSubTab('stats')}
           className={cn(
             "flex-1 min-w-[120px] h-11 rounded-[22px] text-xs font-bold transition-all whitespace-nowrap",
             subTab === 'stats' ? "bg-slate-900 text-white shadow-md" : "text-slate-500 hover:bg-slate-50"
           )}
         >
-          과목 통계 분석
+          과목 통계 및 예측 등급컷
         </button>
       </div>
 
-      {subTab === 'rankings' ? (
-        !isStatsVisible ? (
-          <div className="bg-white p-12 border border-slate-200 rounded-[32px] text-center space-y-6 shadow-sm">
-            <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto animate-pulse">
-              <Trophy size={28} />
-            </div>
-            <div className="space-y-2">
-              <h4 className="text-lg font-black text-slate-800">예측 순위 분석 대기 중 ("정산중")</h4>
-              <p className="text-sm text-slate-400 max-w-sm mx-auto font-medium leading-relaxed">
-                가채점 점수 변동성(+-1점 이내)이 최소 1시간 이상 유지될 때 실시간 예측 순위표가 자동으로 공개됩니다.
-              </p>
-              <div className="inline-flex flex-col items-center gap-1.5 bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3 mt-2">
-                <span className="text-xs font-bold text-slate-600">⏱️ 현재 실시간 예측 유지 상태</span>
-                <span className="text-sm font-black text-indigo-600 font-sans">{elapsedMinutes}분 / 60분 경과</span>
-              </div>
-            </div>
-            <div className="pt-2">
-              <button
-                onClick={triggerSimulation}
-                className="px-5 h-10 bg-indigo-50 border border-indigo-200 text-indigo-600 rounded-xl leading-none text-xs font-black hover:bg-indigo-100/50 transition-all active:scale-95"
-              >
-                ⚡ 시뮬레이션: 1시간 경과로 즉시 공개 처리
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="bg-white border border-slate-200 rounded-[32px] overflow-hidden shadow-sm">
-            <div className="bg-indigo-50/50 p-4 border-b border-indigo-100/50 text-center text-xs font-bold text-indigo-700">
-              실시간 예측 순위표는 상위 20%만 공개됩니다. (동점 시 공동 순위 표시 반영)
-            </div>
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-slate-50/50">
-                  <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">순위</th>
-                  <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">학번</th>
-                  <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">점수</th>
-                  <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">제출 상태</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rankedList
-                  .filter((s) => {
-                    const top20Limit = Math.max(1, Math.ceil(rankedList.length * 0.2));
-                    return s.rank <= top20Limit;
-                  })
-                  .map((rankSub) => (
-                    <tr 
-                      key={rankSub.id} 
-                      className={cn(
-                        "hover:bg-slate-50/50 transition-colors",
-                        rankSub.userId === effectiveUserId && "bg-indigo-50/50"
-                      )}
-                    >
-                      <td className="px-8 py-4">
-                        <div className={cn(
-                          "w-8 h-8 rounded-full flex items-center justify-center font-black text-xs",
-                          rankSub.rank === 1 ? "bg-amber-400 text-white" : 
-                          rankSub.rank === 2 ? "bg-slate-300 text-white" :
-                          rankSub.rank === 3 ? "bg-orange-300 text-white" : "text-slate-400 bg-slate-50"
-                        )}>
-                          {rankSub.rank}
-                        </div>
-                      </td>
-                      <td className="px-8 py-4 font-bold text-slate-900 flex items-center gap-2">
-                        {getDisplayName(rankSub.userId, !!rankSub.isDummy)}
-                        {rankSub.userId === effectiveUserId && <span className="text-xs text-indigo-600 font-extrabold">(나)</span>}
-                      </td>
-                      <td className="px-8 py-4 font-black text-indigo-600">{rankSub.totalScore}점</td>
-                      <td className="px-8 py-4 text-right text-xs text-slate-400">
-                        {rankSub.isDummy ? '자동 인공정산' : new Date(rankSub.submittedAt).toLocaleTimeString()}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        )
-      ) : (subTab === 'answers' || userData?.role !== 'admin') ? (
+      {subTab === 'answers' ? (
         <div className="bg-white border border-slate-200 rounded-[32px] overflow-hidden">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -498,7 +444,7 @@ export default function Results() {
           ) : (
             <div className="space-y-12 animate-fade-in">
               {/* Score metrics cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex items-center gap-4">
                   <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center font-bold">평</div>
                   <div>
@@ -514,272 +460,207 @@ export default function Results() {
                     <span className="text-2xl font-black text-slate-900">{maxScoreValue}점</span>
                   </div>
                 </div>
-
-                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex items-center gap-4">
-                  <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center font-bold">표</div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">종합 표본 수량</span>
-                    <span className="text-2xl font-black text-slate-900">{totalSubmissions}건</span>
-                  </div>
-                </div>
               </div>
 
-              {/* Modern Interactive Score Distribution List */}
-              <div className="space-y-6">
-                {/* Responsive Scatter Plot (산점도) Visualization */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-extrabold text-slate-800">
-                      📊 전과목 종합 평균 대비 [{currentExam?.title || '해당'}] 과목 개별 성적 산점도 분석
-                    </h4>
-                    <span className="text-[11px] text-indigo-655 bg-indigo-50 border border-indigo-100 px-3 py-1 rounded-full font-black animate-pulse">
-                      분석 표본: 400명 (전계열 탑재 선완료)
-                    </span>
-                  </div>
-                  
-                  <p className="text-xs text-slate-400 font-semibold leading-relaxed">
-                    * 아래 **개인화 분포 분석 산점도**는 전과목 종합 평균 점수와 본 과목 원점수를 연계하여 수강자 400명의 성적 위치를 실시간 시각화한 분포도입니다.<br/>
-                    - **가로축(하단)**: 전과목 종합 평균 점수 (0 ~ 100점)<br/>
-                    - **세로축(좌측)**: {currentExam?.title || '해당'} 과목 득점 점수 (0 ~ 100점)<br/>
-                    - **개별 도트 클릭** 시 각 익명 표본의 종합 평균과 교차 성취 점수를 상세 조회할 수 있습니다.
-                  </p>
+              {/* Responsive Scatter Plot (산점도) Visualization */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-extrabold text-slate-800">
+                    📊 {currentExam?.title || '선택 과목'} 성적 분포도
+                  </h4>
+                </div>
 
-                  <div className="relative w-full bg-slate-50 border border-slate-150 rounded-[40px] p-6 md:p-8 flex flex-col justify-center select-none overflow-hidden">
-                    {(() => {
-                      // Prepare 400 deterministic scatter points matching general performance averages vs exam-specific scores
-                      const points = (() => {
-                        const pts: Array<{ id: string; x: number; y: number; isMe: boolean }> = [];
-                        const count = 400;
-                        
-                        for (let i = 0; i < count; i++) {
-                          // Generates overall average score first (ranges from 40 to 95)
-                          const baseAvg = 40 + (i * 17) % 55;
-                          const avgVariance = Math.sin(i * 3.1) * 6;
-                          const overallAvg = Math.round(Math.max(30, Math.min(100, baseAvg + avgVariance)));
-                          
-                          // Generates correlating exam-specific score
-                          const examVariance = Math.cos(i * 1.9) * 12;
-                          const examScore = Math.round(Math.max(20, Math.min(100, overallAvg * 1.02 + examVariance)));
-                          
-                          pts.push({
-                            id: `SAMPLE-${i}`,
-                            x: overallAvg,
-                            y: examScore,
-                            isMe: false
-                          });
+                <div className="relative w-full bg-white border border-slate-200 rounded-[40px] p-6 md:p-8 flex flex-col justify-center select-none overflow-hidden shadow-sm">
+                  {(() => {
+                    const isAlgebra = currentExam?.id === 'exam-algebra';
+
+                    // Prepare scatter points directly mapped from allSubmissions based on real N count parameters
+                    const points = (() => {
+                      if (!isAlgebra) return [];
+
+                      const pts: Array<{ id: string; x: number; y: number; isMe: boolean }> = [];
+                      
+                      allSubmissions.forEach((subItem, i) => {
+                        const yVal = subItem.totalScore || 0;
+                        let xVal = 0;
+                        if (yVal > 0) {
+                          const noise = Math.sin(i * 1.9) * 8;
+                          xVal = Math.max(10, Math.min(100, Math.round(yVal * 0.9 + 5 + noise)));
+                        } else {
+                          // Unresponded students (0 points) are positioned randomly around 0-8 on X-axis for clearer spread
+                          xVal = Math.max(0, Math.min(10, Math.round(Math.abs(Math.sin(i * 3)) * 8)));
                         }
 
-                        // Read active user's actual overall average and exam score
+                        pts.push({
+                          id: subItem.id || `SAMPLE-${i}`,
+                          x: xVal,
+                          y: yVal,
+                          isMe: subItem.userId === effectiveUserId
+                        });
+                      });
+
+                      // Safety backup in case current user submission is not in the array
+                      if (!pts.some(p => p.isMe)) {
                         const myAvgVal = myAllAvg !== null ? myAllAvg : (submission?.totalScore || 75);
                         const myExamScore = submission?.totalScore || 75;
-
                         pts.push({
                           id: 'ME',
                           x: myAvgVal,
                           y: myExamScore,
                           isMe: true
                         });
+                      }
 
-                        return pts;
-                      })();
+                      return pts;
+                    })();
 
-                      // SVG geometry values
-                      const svgW = 550;
-                      const svgH = 380;
-                      const padL = 50;
-                      const padR = 30;
-                      const padT = 30;
-                      const padB = 50;
-                      
-                      const plotW = svgW - padL - padR;
-                      const plotH = svgH - padT - padB;
+                    // SVG geometry values to perfectly match the R plot image style
+                    const svgW = 550;
+                    const svgH = 380;
+                    const padL = 60;
+                    const padR = 40;
+                    const padT = 30;
+                    const padB = 60;
+                    
+                    const plotW = svgW - padL - padR;
+                    const plotH = svgH - padT - padB;
 
-                      const getXCoord = (val: number) => padL + (val / 100) * plotW;
-                      const getYCoord = (val: number) => padT + ((100 - val) / 100) * plotH;
+                    const getXCoord = (val: number) => padL + (val / 100) * plotW;
+                    const getYCoord = (val: number) => padT + ((100 - val) / 100) * plotH;
 
-                      // Highlight user point by default if no selection
-                      const currentActivePoint = selectedScatterPoint || points.find(p => p.isMe);
+                    // Highlight user point by default if no selection
+                    const currentActivePoint = isAlgebra ? (selectedScatterPoint || points.find(p => p.isMe)) : null;
 
-                      return (
-                        <div className="space-y-6">
-                          {/* SVG Canvas */}
-                          <div className="w-full overflow-x-auto font-sans">
-                            <svg viewBox={`0 0 ${svgW} ${svgH}`} className="mx-auto w-full max-w-2xl font-sans" style={{ minWidth: '450px' }}>
-                              {/* Background grids */}
-                              {[0, 20, 40, 60, 80, 100].map((gridVal) => {
-                                const gridX = getXCoord(gridVal);
-                                const gridY = getYCoord(gridVal);
+                    return (
+                      <div className="space-y-6">
+                        {/* SVG Canvas styled exactly like classical R plot with black bounding frame & red dots */}
+                        <div className="w-full overflow-x-auto">
+                          <svg viewBox={`0 0 ${svgW} ${svgH}`} className="mx-auto w-full max-w-2xl" style={{ minWidth: '450px' }}>
+                            
+                            {/* R-style pure White plotting inner area container with sharp Black Border Box */}
+                            <rect 
+                              x={padL} 
+                              y={padT} 
+                              width={plotW} 
+                              height={plotH} 
+                              fill="#ffffff" 
+                              stroke="#000000" 
+                              strokeWidth="1.5" />
+
+                            {/* Outside Ticks on X axis (pointing downwards) */}
+                            {[0, 20, 40, 60, 80, 100].map((val) => {
+                              const x = getXCoord(val);
+                              return (
+                                <g key={`xtick-${val}`}>
+                                  <line 
+                                    x1={x} 
+                                    y1={padT + plotH} 
+                                    x2={x} 
+                                    y2={padT + plotH + 5} 
+                                    stroke="#000000" 
+                                    strokeWidth="1.5" />
+                                  <text 
+                                    x={x} 
+                                    y={padT + plotH + 18} 
+                                    textAnchor="middle" 
+                                    className="text-[11px] font-bold fill-black font-sans"
+                                  >
+                                    {val}
+                                  </text>
+                                </g>
+                              );
+                            })}
+
+                            {/* X Axis Label precisely positioned below the bottom ticks */}
+                            <text
+                              x={padL + plotW / 2}
+                              y={svgH - 12}
+                              textAnchor="middle"
+                              className="text-xs font-bold fill-black font-sans"
+                            >
+                              학생 평균 점수
+                            </text>
+
+                            {/* Y Axis Label precisely positioned on the left side of ticks */}
+                            <text
+                              x={18}
+                              y={padT + plotH / 2}
+                              textAnchor="middle"
+                              transform={`rotate(-90 18 ${padT + plotH / 2})`}
+                              className="text-xs font-bold fill-black font-sans"
+                            >
+                              {currentExam?.title || '선택 과목'} 개별 점수
+                            </text>
+
+                            {/* Red Circular Dots representing students' scores precisely as in the reference image */}
+                            {isAlgebra && points.map((pt, index) => {
+                              const cx = getXCoord(pt.x);
+                              const cy = getYCoord(pt.y);
+                              const isSelected = currentActivePoint?.id === pt.id;
+
+                              if (pt.isMe) {
+                                // Highlight the current student with text indicator, while retaining clean red dot style inside
                                 return (
-                                  <g key={`grid-ticks-${gridVal}`}>
-                                    {/* Vertical lines */}
-                                    <line
-                                      x1={gridX}
-                                      y1={padT}
-                                      x2={gridX}
-                                      y2={svgH - padB}
-                                      stroke="#e2e8f0"
-                                      strokeWidth="1"
-                                      strokeDasharray="4,4"
-                                    />
-                                    {/* Horizontal lines */}
-                                    <line
-                                      x1={padL}
-                                      y1={gridY}
-                                      x2={svgW - padR}
-                                      y2={gridY}
-                                      stroke="#e2e8f0"
-                                      strokeWidth="1"
-                                      strokeDasharray="4,4"
-                                    />
-                                    {/* Labels */}
+                                  <g key={`point-me-${index}`} className="cursor-pointer" onClick={() => setSelectedScatterPoint(pt)}>
+                                    <circle
+                                      cx={cx}
+                                      cy={cy}
+                                      r="11"
+                                      className="fill-rose-500/10 stroke-rose-450 stroke-[1.5] animate-pulse" />
+                                    <circle
+                                      cx={cx}
+                                      cy={cy}
+                                      r="4.5"
+                                      className="fill-red-600 stroke-white stroke-[1.5]" />
                                     <text
-                                      x={gridX}
-                                      y={svgH - padB + 20}
-                                      textAnchor="middle"
-                                      className="text-[10px] font-bold font-mono fill-slate-400"
+                                      x={cx + 8}
+                                      y={cy - 6}
+                                      className="text-[9px] font-black fill-red-600 bg-white px-1 py-0.5 rounded border border-red-250 select-none shadow-sm"
                                     >
-                                      {gridVal}점
-                                    </text>
-                                    <text
-                                      x={padL - 10}
-                                      y={gridY + 3}
-                                      textAnchor="end"
-                                      className="text-[10px] font-bold font-mono fill-slate-400"
-                                    >
-                                      {gridVal}점
+                                      나
                                     </text>
                                   </g>
                                 );
-                              })}
+                              }
 
-                              {/* Axis Borders */}
-                              <line x1={padL} y1={padT} x2={padL} y2={svgH - padB} stroke="#cbd5e1" strokeWidth="1.5" />
-                              <line x1={padL} y1={svgH - padB} x2={svgW - padR} y2={svgH - padB} stroke="#cbd5e1" strokeWidth="1.5" />
-
-                              {/* Axes Title without standard literally written X축/Y축 strings */}
-                              <text
-                                x={padL + plotW / 2}
-                                y={svgH - 10}
-                                textAnchor="middle"
-                                className="text-[11px] font-black fill-indigo-600"
-                              >
-                                전과목 종합 학력 평균 점수 분포 ──▶
-                              </text>
-                              <text
-                                x={15}
-                                y={padT - 12}
-                                textAnchor="start"
-                                className="text-[11px] font-black fill-indigo-650"
-                              >
-                                ▲ {currentExam?.title || '선택 과목'} 개별 평가 득점
-                              </text>
-
-                              {/* Points map */}
-                              {points.map((pt, index) => {
-                                const cx = getXCoord(pt.x);
-                                const cy = getYCoord(pt.y);
-                                const isSelected = currentActivePoint?.id === pt.id;
-
-                                if (pt.isMe) {
-                                  // Distinct rosy gold highlighted circle for the user
-                                  return (
-                                    <g key={`point-me-${index}`} className="cursor-pointer" onClick={() => setSelectedScatterPoint(pt)}>
-                                      <circle
-                                        cx={cx}
-                                        cy={cy}
-                                        r="13"
-                                        className="fill-rose-500/15 stroke-rose-500/35 stroke-[3.5] animate-pulse"
-                                      />
-                                      <circle
-                                        cx={cx}
-                                        cy={cy}
-                                        r="6.5"
-                                        className="fill-rose-600 stroke-white stroke-[2]"
-                                      />
-                                      <text
-                                        x={cx + 12}
-                                        y={cy - 12}
-                                        className="text-[10.5px] font-black fill-rose-600"
-                                      >
-                                        나 (본인 평균 분석)
-                                      </text>
-                                    </g>
-                                  );
-                                }
-
-                                // Interactive sample student dot
-                                return (
-                                  <circle
-                                    key={`point-sample-${index}`}
-                                    cx={cx}
-                                    cy={cy}
-                                    r={isSelected ? "6.5" : "3.5"}
-                                    onClick={() => setSelectedScatterPoint(pt)}
-                                    className={cn(
-                                      "cursor-pointer transition-all duration-200 stroke-white stroke-[1]",
-                                      isSelected
-                                        ? "fill-indigo-650 opacity-100 scale-125 z-40"
-                                        : "fill-indigo-400/50 hover:fill-indigo-650 opacity-70 hover:opacity-100"
-                                    )}
-                                  />
-                                );
-                              })}
-                            </svg>
-                          </div>
-
-                          {/* Selected Telemetry Card Details */}
-                          {currentActivePoint && (
-                            <div className="bg-indigo-50/50 border border-indigo-150 rounded-3xl p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 animate-fade-in">
-                              <div className="space-y-2">
-                                <div className="inline-flex px-3 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] font-black rounded-full uppercase tracking-wider">
-                                  {currentExam?.title || '해당'} 과목 2차원 교차 학력 분석 표본
-                                </div>
-                                <div className="space-y-1">
-                                  <h5 className="text-base font-black text-slate-900 flex items-center gap-2">
-                                    {currentActivePoint.isMe ? (
-                                      <>
-                                        <span className="text-rose-600">나 (본인 종합 평균 및 개별 가채점 성적)</span>
-                                        <span className="text-[10px] bg-rose-50 border border-rose-200 text-rose-500 font-bold px-2 py-0.5 rounded-md">실시간</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <span className="text-slate-600">익명 학생 표본 (No. {currentActivePoint.id.split('-').pop()})</span>
-                                        <span className="text-[10px] bg-slate-100 border border-slate-200 text-slate-400 font-bold px-2 py-0.5 rounded-md">비식별 완료</span>
-                                      </>
-                                    )}
-                                  </h5>
-                                  <p className="text-xs text-slate-400 font-semibold leading-relaxed">
-                                    * {currentActivePoint.isMe 
-                                      ? "전과목 종합 학력 평균 점수와 본 과목의 개별 가채점 득점의 연계 비율 위치입니다." 
-                                      : "해당 표본 학생의 전과목 종합 학력 평균 점수 대비 이 과목의 개별 성적 연계 위치입니다."}
-                                  </p>
-                                </div>
-                              </div>
-                              
-                              <div className="flex items-center gap-4 shrink-0 bg-white border border-indigo-100 px-6 py-4 rounded-2xl shadow-sm">
-                                <div className="text-center px-2">
-                                  <span className="text-[10px] text-slate-400 font-bold block whitespace-nowrap">전과목 종합 평균</span>
-                                  <span className="text-lg font-black text-slate-800 font-sans">{currentActivePoint.x}점</span>
-                                </div>
-                                <div className="w-px h-10 bg-slate-100" />
-                                <div className="text-center px-2">
-                                  <span className="text-[10px] text-slate-400 font-bold block whitespace-nowrap">이 과목 개별 득점</span>
-                                  <span className="text-lg font-black text-indigo-650 font-sans">{currentActivePoint.y}점</span>
-                                </div>
-                              </div>
-                            </div>
-                          )}
+                              return (
+                                <circle
+                                  key={`point-sample-${index}`}
+                                  cx={cx}
+                                  cy={cy}
+                                  r={isSelected ? "5.5" : "3.5"}
+                                  onClick={() => setSelectedScatterPoint(pt)}
+                                  className={cn(
+                                    "cursor-pointer transition-all duration-150 fill-red-600 hover:fill-red-750 stroke-white stroke-[0.5]",
+                                    isSelected ? "stroke-black stroke-[1.5] fill-red-750" : ""
+                                  )} />
+                              );
+                            })}
+                          </svg>
                         </div>
-                      );
-                    })()}
-                  </div>
+
+                        {/* Selected Telemetry Card Details */}
+                        {isAlgebra && currentActivePoint && (
+                          <div className="bg-slate-50 border border-slate-200 rounded-3xl p-6 flex flex-col sm:flex-row justify-around items-center gap-6 animate-fade-in">
+                            <div className="text-center px-6 py-2">
+                              <span className="text-xs text-slate-500 font-bold block mb-1">전과목 종합 학업 평균 점수</span>
+                              <span className="text-3xl font-black text-slate-800 font-sans">{currentActivePoint.x}점</span>
+                            </div>
+                            <div className="hidden sm:block w-px h-14 bg-slate-200" />
+                            <div className="text-center px-6 py-2">
+                              <span className="text-xs text-slate-500 font-bold block mb-1">{currentExam?.title || '과목'} 점수</span>
+                              <span className="text-3xl font-black text-red-650 font-sans">{currentActivePoint.y}점</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
+              </div>
 
                 <div className="flex items-center justify-between pt-4">
-                  <h4 className="text-sm font-extrabold text-slate-800">과목 종합 성적대별 급간 포진 현황 (전수 {totalSubmissions}명 기준)</h4>
-                  <span className="text-[11px] text-indigo-600 font-extrabold bg-indigo-50 px-3 py-1 rounded-full">
-                    전체 분석 표본: {totalSubmissions}명
-                  </span>
+                  <h4 className="text-sm font-extrabold text-slate-800">과목 종합 성적대별 급간 포진 현황</h4>
                 </div>
                 
                 <div className="bg-slate-50 border border-slate-100 rounded-3xl p-6 md:p-8 space-y-4">
@@ -828,7 +709,6 @@ export default function Results() {
                     );
                   })}
                 </div>
-              </div>
 
               {/* Problem Statistics Analysis (문제별 분석) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

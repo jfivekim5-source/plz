@@ -34,7 +34,7 @@ export default function Layout({ children }: LayoutProps) {
               <div className="flex items-center gap-4">
                 <Link 
                   to="/settings"
-                  className="hidden sm:flex flex-col items-end group hover:opacity-80 transition-opacity"
+                  className="flex flex-col items-end group hover:opacity-85 transition-opacity bg-slate-50 border border-slate-200 px-4 py-1.5 rounded-2xl shadow-sm"
                 >
                   <span className="text-xs font-bold text-slate-900 flex items-center gap-1">
                     {userData?.studentId || '사용자'} 
@@ -42,12 +42,6 @@ export default function Layout({ children }: LayoutProps) {
                   </span>
                   <span className="text-[10px] text-slate-500 font-medium">{userData?.name || '정보 없음'}</span>
                 </Link>
-                <button
-                  onClick={() => logout()}
-                  className="inline-flex h-10 items-center justify-center rounded-full bg-slate-100 px-6 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-200"
-                >
-                  로그아웃
-                </button>
               </div>
             ) : (
               <Link
@@ -73,7 +67,7 @@ export default function Layout({ children }: LayoutProps) {
             </span>
           </div>
           <p className="text-sm text-slate-500 text-center md:text-left">
-            © 2026 등급컷.com. 모든 예상 데이터는 표본 기반 추정치입니다.
+            © 2026 등급컷.com. 모든 예상 데이터는 실시간 예측 추정치입니다.
           </p>
           <div className="flex gap-6 items-center">
             <Link to="/admin" className="text-sm text-slate-600 font-medium hover:text-indigo-600">사이트 관리</Link>

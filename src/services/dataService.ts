@@ -8,7 +8,9 @@ import {
   where, 
   orderBy,
   limit,
-  onSnapshot
+  onSnapshot,
+  deleteDoc,
+  updateDoc
 } from 'firebase/firestore';
 import { db, auth, isPlaceholder } from '@/src/lib/firebase';
 import { Exam, Question, Submission } from '@/src/types';
@@ -175,10 +177,7 @@ const INITIAL_EXAMS: Exam[] = [
 ];
 
 // Initial Mock Reviews
-const INITIAL_REVIEWS = [
-  { id: 'r1', examId: 'exam-speech-lang', userId: '20401', content: '이번 화작 좀 까다로웠던 것 같아요...', createdAt: new Date().toISOString() },
-  { id: 'r2', examId: 'exam-algebra', userId: '20512', content: '대수 15번 실화입니까? 너무 어려움', createdAt: new Date().toISOString() },
-];
+const INITIAL_REVIEWS: any[] = [];
 
 export const ReviewService = {
   async getReviews(examId?: string): Promise<any[]> {
@@ -233,11 +232,44 @@ export const ReviewService = {
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'reviews');
     }
+  },
+  async deleteReview(reviewId: string) {
+    if (isPlaceholder) {
+      const reviews = await this.getReviews();
+      const updated = reviews.filter((r: any) => r.id !== reviewId);
+      localStorage.setItem(REVIEWS_KEY, JSON.stringify(updated));
+      return;
+    }
+    try {
+      await deleteDoc(doc(db!, 'reviews', reviewId));
+    } catch (error) {
+      console.warn("Firestore delete review error", error);
+    }
+  },
+  async updateReview(reviewId: string, newContent: string) {
+    if (isPlaceholder) {
+      const reviews = await this.getReviews();
+      const updated = reviews.map((r: any) => r.id === reviewId ? { ...r, content: newContent } : r);
+      localStorage.setItem(REVIEWS_KEY, JSON.stringify(updated));
+      return;
+    }
+    try {
+      await updateDoc(doc(db!, 'reviews', reviewId), { content: newContent });
+    } catch (error) {
+      console.warn("Firestore update review error", error);
+    }
   }
 };
 
+let cachedExams: Exam[] | null = null;
+const questionsCache: Record<string, Question[]> = {};
+
 export const ExamService = {
   async getExams(): Promise<Exam[]> {
+    if (cachedExams) {
+      return cachedExams;
+    }
+
     if (isPlaceholder) {
       const saved = localStorage.getItem(EXAMS_KEY);
       let list = saved ? JSON.parse(saved) : [];
@@ -249,6 +281,7 @@ export const ExamService = {
         }
       });
       localStorage.setItem(EXAMS_KEY, JSON.stringify(mergedList));
+      cachedExams = mergedList;
       return mergedList;
     }
 
@@ -257,21 +290,27 @@ export const ExamService = {
       const dbExams = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Exam));
       const mergedList = [...INITIAL_EXAMS];
       
-      for (const ie of INITIAL_EXAMS) {
-        if (!dbExams.some(e => e.id === ie.id)) {
-          try {
-            await setDoc(doc(db!, 'exams', ie.id), ie);
-          } catch(e){}
-        }
-      }
-      
       dbExams.forEach((e: any) => {
         if (!mergedList.some((ie) => ie.id === e.id)) {
           mergedList.push(e);
         }
       });
+
+      // Background non-blocking seeding of any missing exams
+      const missingExams = INITIAL_EXAMS.filter(ie => !dbExams.some(e => e.id === ie.id));
+      if (missingExams.length > 0) {
+        Promise.all(
+          missingExams.map(ie => 
+            setDoc(doc(db!, 'exams', ie.id), ie).catch(() => {})
+          )
+        ).catch(() => {});
+      }
+
+      cachedExams = mergedList;
       return mergedList;
     } catch (error) {
+      console.warn("Firestore getExams error, falling back to INITIAL_EXAMS", error);
+      cachedExams = INITIAL_EXAMS;
       return INITIAL_EXAMS;
     }
   },
@@ -282,6 +321,7 @@ export const ExamService = {
   },
 
   async addExam(exam: Exam): Promise<void> {
+    cachedExams = null;
     if (isPlaceholder) {
       const exams = await this.getExams();
       if (!exams.some(e => e.id === exam.id)) {
@@ -335,11 +375,17 @@ export const ExamService = {
   },
 
   async getQuestions(examId: string): Promise<Question[]> {
+    if (questionsCache[examId]) {
+      return questionsCache[examId];
+    }
+
     const savedKey = `custom_questions_${examId}`;
     const savedData = localStorage.getItem(savedKey);
     if (savedData) {
       try {
-        return JSON.parse(savedData);
+        const parsed = JSON.parse(savedData);
+        questionsCache[examId] = parsed;
+        return parsed;
       } catch (e) {}
     }
 
@@ -380,43 +426,58 @@ export const ExamService = {
 
     if (isPlaceholder) {
       const seedList = generateMockQuestions(examId);
-      if (examId === 'exam-algebra') {
-        return seedList.map(q => ({ ...q, answer: '1' }));
-      }
-      return seedList;
+      const finalSeed = examId === 'exam-algebra' ? seedList.map(q => ({ ...q, answer: '1' })) : seedList;
+      questionsCache[examId] = finalSeed;
+      return finalSeed;
     }
     if (!db) return [];
     try {
       const snapshot = await getDocs(collection(db, 'exams', examId, 'questions'));
       if (snapshot.empty) {
-        // Automatically seed questions into Firebase for this exam
+        // Automatically seed questions into Firebase for this exam in the background parallelly!
         const seedList = generateMockQuestions(examId);
-        for (const q of seedList) {
-          try {
-            await setDoc(doc(db, 'exams', examId, 'questions', q.id), q);
-          } catch (seedErr) {
-            console.error(`Failed to write seeded question Q-${q.number} for ${examId}:`, seedErr);
-          }
-        }
-        return seedList;
+        Promise.all(
+          seedList.map(q => 
+            setDoc(doc(db!, 'exams', examId, 'questions', q.id), q).catch(() => {})
+          )
+        ).catch(() => {});
+        const finalSec = examId === 'exam-algebra' ? seedList.map(q => ({ ...q, answer: '1' })) : seedList;
+        questionsCache[examId] = finalSec;
+        return finalSec;
       }
       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question));
-      if (examId === 'exam-algebra') {
-        return list.map(q => ({ ...q, answer: '1' }));
-      }
-      return list;
+      const finalList = examId === 'exam-algebra' ? list.map(q => ({ ...q, answer: '1' })) : list;
+      questionsCache[examId] = finalList;
+      return finalList;
     } catch (error) {
       console.error('getQuestions failed', error);
       const seedList = generateMockQuestions(examId);
-      if (examId === 'exam-algebra') {
-        return seedList.map(q => ({ ...q, answer: '1' }));
-      }
-      return seedList;
+      const finalErr = examId === 'exam-algebra' ? seedList.map(q => ({ ...q, answer: '1' })) : seedList;
+      questionsCache[examId] = finalErr;
+      return finalErr;
     }
   }
 };
 
 const REAL_SUBMISSIONS_KEY = 'exam_app_real_submissions_v3';
+
+const dummySubmissionsCache: Record<string, Submission[]> = {};
+const submissionsCache: Record<string, Submission[]> = {};
+
+const EXAM_MEMBERS_MAP: Record<string, number> = {
+  'exam-speech-lang': 396,
+  'exam-algebra': 200,
+  'exam-english1': 396,
+  'exam-physics': 215,
+  'exam-chemistry': 216,
+  'exam-earth': 148,
+  'exam-ai-basics': 186,
+  'exam-ai-math': 120,
+};
+
+export const getExamCapacity = (examId: string): number => {
+  return EXAM_MEMBERS_MAP[examId] || 100;
+};
 
 export const SubmissionService = {
   async getRealSubmissions(): Promise<Submission[]> {
@@ -425,6 +486,8 @@ export const SubmissionService = {
   },
 
   async submit(submission: Submission) {
+    delete submissionsCache[submission.examId];
+
     if (isPlaceholder) {
       const reals = await this.getRealSubmissions();
       const filtered = reals.filter(s => !(s.userId === submission.userId && s.examId === submission.examId));
@@ -474,27 +537,35 @@ export const SubmissionService = {
         pool.push(`2${classStr}${numStr}`);
       }
     }
-    // 400명 초과시 뒷번호부터 랜덤으로 삭제되도록 후반부 인덱스에서 무작위 선택하여 제거
-    while (pool.length > capacity) {
-      const startIndex = Math.floor(pool.length * 0.7);
-      const deleteIdx = startIndex + Math.floor(Math.random() * (pool.length - startIndex));
-      pool.splice(deleteIdx, 1);
-    }
-    return pool;
+    // High-performance slice to avoid expensive repeated array splicing
+    return pool.slice(0, capacity);
   },
 
   generateDummySubmissions(examId: string, capacity: number): Submission[] {
+    const cacheKey = `${examId}-${capacity}`;
+    if (dummySubmissionsCache[cacheKey]) {
+      return dummySubmissionsCache[cacheKey];
+    }
+
     const list: Submission[] = [];
     const studentIds = this.generateMockStudentIds(capacity);
+    
+    // 미응답자 비율 (예: 약 15%)은 0점으로 둡니다.
+    const noResponsePercentage = 0.15;
+    const noResponseCount = Math.floor(capacity * noResponsePercentage);
+
     for (let i = 0; i < capacity; i++) {
       const studentId = studentIds[i] || `DUMMY-${examId}-${(i + 1).toString().padStart(4, '0')}`;
       
-      // Generate highly realistic, deterministic bell-curve scores centered around 60-70 points
       let totalScore = 0;
-      if (examId === 'exam-algebra' || examId.includes('algebra')) {
-        totalScore = Math.max(30, Math.min(100, Math.round(68 + Math.sin(i * 3.7) * 20 + Math.cos(i * 1.3) * 10)));
+      if (i < noResponseCount) {
+        // 미응답자는 0점 처리
+         totalScore = 0;
       } else {
-        totalScore = Math.max(25, Math.min(100, Math.round(62 + Math.sin(i * 4.1) * 22 + Math.cos(i * 1.9) * 8)));
+        // 나머지 인원은 0~100점 고루고루(Uniform) 분포되게 함
+        const scaleIndex = i - noResponseCount;
+        const scaleTotal = capacity - noResponseCount;
+        totalScore = Math.max(0, Math.min(100, Math.round((scaleIndex / (scaleTotal - 1 || 1)) * 100)));
       }
 
       list.push({
@@ -508,15 +579,21 @@ export const SubmissionService = {
           score: Math.random() < (totalScore / 100) ? 5 : 0
         })),
         totalScore,
-        isDummy: true, // Marker for artificial accounts
+        isDummy: true,
         submittedAt: new Date(Date.now() - Math.random() * 86400000).toISOString()
       });
     }
+
+    dummySubmissionsCache[cacheKey] = list;
     return list;
   },
 
   async getAllSubmissions(examId: string): Promise<Submission[]> {
-    const capacity = 400; // Constrained to exactly 400 for all subjects as requested
+    if (submissionsCache[examId]) {
+      return submissionsCache[examId];
+    }
+
+    const capacity = getExamCapacity(examId);
 
     const dummyList = this.generateDummySubmissions(examId, capacity);
 
@@ -537,7 +614,6 @@ export const SubmissionService = {
       realSubs = realSubs.filter(s => s.examId === examId).map(s => ({ ...s, isDummy: false }));
     }
 
-    // Seed default exemplary data for any exam - actual respondents
     if (realSubs.length === 0) {
       const exampleScores = [100, 96, 92, 92, 88, 88, 84, 84, 80, 80, 76, 76, 72, 68, 64, 60, 56, 48, 44, 32, 20];
       realSubs = exampleScores.map((score, idx) => ({
@@ -551,33 +627,53 @@ export const SubmissionService = {
           score: Math.random() < (score / 100) ? 5 : 0
         })),
         totalScore: score,
-        isDummy: false, // Real respondent flag
+        isDummy: false,
         submittedAt: new Date(Date.now() - idx * 3600000).toISOString()
       }));
     }
 
     const realCount = realSubs.length;
+    let finalResult = dummyList;
     if (realCount > 0) {
-      // 덤이 데이터에서 진짜 제출 수만큼 제외하고 병합하여 전체 capacity가 그대로 유지되도록 합니다.
-      const chosenDummyList = dummyList.slice(0, Math.max(0, capacity - realCount));
-      return [...chosenDummyList, ...realSubs];
+      const listCopy = [...dummyList];
+      for (let r = 0; r < realCount; r++) {
+        const realSub = realSubs[r];
+        const zeroIndex = listCopy.findIndex(d => d.isDummy && d.totalScore === 0);
+        if (zeroIndex !== -1) {
+          listCopy[zeroIndex] = realSub;
+        } else {
+          const anyDummyIndex = listCopy.findIndex(d => d.isDummy);
+          if (anyDummyIndex !== -1) {
+            listCopy[anyDummyIndex] = realSub;
+          } else {
+            listCopy.push(realSub);
+          }
+        }
+      }
+      finalResult = listCopy;
     }
 
-    return dummyList;
+    submissionsCache[examId] = finalResult;
+    return finalResult;
   },
 
-  async getAllSubmissionsRaw(): Promise<Submission[]> {
+  async getAllSubmissionsRaw(examIds?: string[]): Promise<Submission[]> {
+    const targetExams = examIds && examIds.length > 0
+      ? INITIAL_EXAMS.filter(e => examIds.includes(e.id))
+      : INITIAL_EXAMS;
+
+    const results = await Promise.all(
+      targetExams.map(exam => this.getAllSubmissions(exam.id))
+    );
     const all: Submission[] = [];
-    const exams = INITIAL_EXAMS;
-    for (const exam of exams) {
-      const subs = await this.getAllSubmissions(exam.id);
+    for (const subs of results) {
       all.push(...subs);
     }
     return all;
   },
 
-  async getAllSubmissionsAcrossExams(): Promise<Submission[]> {
-    return this.getAllSubmissionsRaw();
+  async getAllSubmissionsAcrossExams(examIds?: string[]): Promise<Submission[]> {
+    return this.getAllSubmissionsRaw(examIds);
   }
 };
 

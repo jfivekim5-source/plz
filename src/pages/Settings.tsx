@@ -5,7 +5,7 @@ import { User, Shield, Key, Eye, EyeOff, Check, ArrowRight } from 'lucide-react'
 import { cn } from '@/src/lib/utils';
 
 export default function Settings() {
-  const { userData, updateProfileNickname, setupPassword, togglePrivacy } = useAuth();
+  const { userData, updateProfileNickname, setupPassword, togglePrivacy, logout } = useAuth();
   const [nickname, setNickname] = useState(userData?.nickname || userData?.name || '');
   const [newPass, setNewPass] = useState('');
   const [showValues, setShowValues] = useState(false);
@@ -15,8 +15,8 @@ export default function Settings() {
   const handleUpdateNickname = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nickname.trim()) return;
-    if (nickname.trim().length > 10) {
-      alert('닉네임은 최대 10글자까지 설정 가능합니다.');
+    if (nickname.trim().length > 5) {
+      alert('닉네임은 최대 5글자까지 설정 가능합니다.');
       return;
     }
     try {
@@ -58,15 +58,15 @@ export default function Settings() {
           </div>
           <div className="flex-1 space-y-3">
             <div className="space-y-1">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">닉네임 설정 (최대 10자)</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">닉네임 설정 (최대 5자)</span>
               <form onSubmit={handleUpdateNickname} className="flex gap-2">
                 <input
                   type="text"
-                  maxLength={10}
+                  maxLength={5}
                   value={nickname}
                   onChange={(e) => setNickname(e.target.value)}
                   className="flex-1 h-12 px-4 rounded-xl border border-slate-100 bg-slate-50 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all font-bold text-sm"
-                  placeholder="닉네임 입력 (최대 10자)"
+                  placeholder="닉네임 입력 (최대 5자)"
                 />
                 <button
                   type="submit"
@@ -166,6 +166,21 @@ export default function Settings() {
                 animate={{ x: userData.isPrivate ? 24 : 0 }}
                 className="w-6 h-6 bg-white rounded-full shadow-sm"
               />
+            </button>
+          </div>
+
+          {/* 5. Safe Logout */}
+          <div className="p-6 bg-rose-50/40 rounded-[28px] border border-rose-100/60 flex items-center justify-between">
+            <div className="space-y-1 pr-4">
+              <span className="text-[10px] font-bold text-rose-500 uppercase tracking-widest">안전한 세션 종료</span>
+              <p className="font-bold text-slate-800">로그아웃</p>
+              <p className="text-[10px] text-slate-400">현재 기기에서 안전하게 로그아웃하고 세션을 종료합니다.</p>
+            </div>
+            <button
+              onClick={() => logout()}
+              className="h-11 px-6 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-700 transition-all active:scale-95 shrink-0 animate-fade-in"
+            >
+              로그아웃
             </button>
           </div>
         </div>
