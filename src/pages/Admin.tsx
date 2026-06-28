@@ -1105,12 +1105,12 @@ export default function Admin() {
                 <button
                   type="button"
                   onClick={() => {
-                    const updated = { ...siteSettings, allowGuestView: !siteSettings.allowGuestView };
+                    const updated = { ...siteSettings, allowGuestView: !siteSettings?.allowGuestView };
                     saveSiteSettings(updated);
                   }}
                   className={cn(
                     "w-12 h-6.5 rounded-full transition-all flex items-center p-0.5 cursor-pointer shrink-0 focus:outline-none",
-                    siteSettings.allowGuestView ? "bg-blue-600 justify-end" : "bg-slate-300 justify-start"
+                    siteSettings?.allowGuestView ? "bg-blue-600 justify-end" : "bg-slate-300 justify-start"
                   )}
                 >
                   <div className="w-5.5 h-5.5 rounded-full bg-white shadow-sm" />
@@ -1126,12 +1126,12 @@ export default function Admin() {
                 <button
                   type="button"
                   onClick={() => {
-                    const updated = { ...siteSettings, allowGuestVoteView: siteSettings.allowGuestVoteView === false ? true : false };
+                    const updated = { ...siteSettings, allowGuestVoteView: siteSettings?.allowGuestVoteView === false ? true : false };
                     saveSiteSettings(updated);
                   }}
                   className={cn(
                     "w-12 h-6.5 rounded-full transition-all flex items-center p-0.5 cursor-pointer shrink-0 focus:outline-none",
-                    siteSettings.allowGuestVoteView !== false ? "bg-blue-600 justify-end" : "bg-slate-300 justify-start"
+                    siteSettings?.allowGuestVoteView !== false ? "bg-blue-600 justify-end" : "bg-slate-300 justify-start"
                   )}
                 >
                   <div className="w-5.5 h-5.5 rounded-full bg-white shadow-sm" />
@@ -1182,7 +1182,7 @@ export default function Admin() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {exams.map((exam) => {
-                const subConf = siteSettings.subjects[exam.id] || { 
+                const subConf = siteSettings?.subjects?.[exam.id] || { 
                    minResponseRate: 40, 
                    scoreChangeDiff: 1, 
                    discloseGrading: true,
@@ -1195,7 +1195,7 @@ export default function Admin() {
                   const updatedSettings = {
                     ...siteSettings,
                     subjects: {
-                      ...siteSettings.subjects,
+                      ...(siteSettings?.subjects || {}),
                       [exam.id]: updatedConf
                     }
                   };
