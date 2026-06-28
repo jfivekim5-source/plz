@@ -268,6 +268,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error('유효하지 않은 가입용 코드입니다. 올바른 할당 코드를 입력해 주세요.');
     }
 
+    if (targetUser.password && targetUser.password.trim() !== '') {
+      throw new Error('이미 회원가입 및 비밀번호 설정이 완료된 코드입니다. 학번과 비밀번호로 로그인해 주시기 바랍니다.');
+    }
+
     setSession(targetUser);
   };
 
