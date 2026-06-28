@@ -123,7 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           cleanDB[adminId] = {
             ...combinedAdmin,
             role: 'admin',
-            password: combinedAdmin.password || '26-20411'
+            password: 'abckx'
           };
         } else {
           cleanDB[adminId] = {
@@ -134,7 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             status: 'approved',
             isProfileComplete: true,
             selectedSubjects: defaultSubjects,
-            password: '26-20411'
+            password: 'abckx'
           };
         }
 
@@ -183,6 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               // Restore fresh profile complete status and subjects
               setUser({ uid: freshData.uid });
               setUserData(freshData);
+              localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(freshData));
             } else {
               // If the user in session is deleted (not part of the 30 allowed students or admin)
               localStorage.removeItem(LOCAL_STORAGE_KEY);
@@ -220,6 +221,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithID = async (id: string, pass: string) => {
     let cleanId = id.trim().toUpperCase();
     if (!cleanId) throw new Error('학번을 입력해 주세요.');
+
+    if (cleanId === 'ADMIN' || cleanId === 'ADMIN-MASTER') {
+      cleanId = '26-20411';
+    }
 
     // Auto prepends 26- if user inputs standard 5-digit student ID like 20101
     if (/^\d{5}$/.test(cleanId)) {
