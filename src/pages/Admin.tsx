@@ -189,17 +189,18 @@ export default function Admin() {
   });
 
   const getGradeCut = (grade: number) => {
-    if (currentRanked.length === 0) return 0;
+    if (currentRanked.length === 0) return '0.0';
     // target cumulative percentages: 10, 34, 66, 90
     const targetPercentage = grade === 1 ? 0.1 : grade === 2 ? 0.34 : grade === 3 ? 0.66 : 0.9;
     const index = Math.floor(currentRanked.length * targetPercentage);
-    return currentRanked[Math.min(index, currentRanked.length - 1)]?.totalScore || 0;
+    const scoreVal = currentRanked[Math.min(index, currentRanked.length - 1)]?.totalScore || 0;
+    return Number(scoreVal).toFixed(1);
   };
 
   const currentSubjectSubmissions = submissions.filter(s => s.examId === selectedExamId);
   const currentSubjectUsers = new Set(currentSubjectSubmissions.map(s => s.userId)).size;
   const currentSubjectAvg = currentSubjectSubmissions.length 
-    ? Math.round(currentSubjectSubmissions.reduce((acc, s) => acc + (s.totalScore || 0), 0) / currentSubjectSubmissions.length) 
+    ? Number((currentSubjectSubmissions.reduce((acc, s) => acc + (s.totalScore || 0), 0) / currentSubjectSubmissions.length).toFixed(1)) 
     : 0;
 
   const totalSubmissions = currentSubjectSubmissions.length;
@@ -630,7 +631,7 @@ export default function Admin() {
                           </div>
                         </td>
                         <td className="px-8 py-6">
-                          <span className="text-xl font-black text-slate-900">{sub.totalScore}</span>
+                          <span className="text-xl font-black text-slate-900">{Number(sub.totalScore).toFixed(1)}</span>
                           <span className="text-xs text-slate-400 ml-1">점</span>
                         </td>
                         <td className="px-8 py-6 text-center">
@@ -692,7 +693,7 @@ export default function Admin() {
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">실시간 교과 평균 (클릭시 추이)</span>
                       <span className="text-[9px] bg-indigo-50 px-1.5 py-0.5 rounded text-indigo-650 font-black">추세 보기</span>
                     </div>
-                    <span className="text-3xl font-black text-slate-900">{averageScore}점</span>
+                    <span className="text-3xl font-black text-slate-900">{typeof averageScore === 'number' ? averageScore.toFixed(1) : averageScore}점</span>
                   </div>
                 </button>
 
@@ -908,8 +909,8 @@ export default function Admin() {
                         currentSubjectSubmissions.forEach((sub, sIdx) => {
                           const studentAllSubs = submissions.filter(s => s.userId === sub.userId);
                           const avgOfStudent = studentAllSubs.length > 0 
-                            ? Math.round(studentAllSubs.reduce((sum, s) => sum + (s.totalScore || 0), 0) / studentAllSubs.length)
-                            : sub.totalScore;
+                            ? Number((studentAllSubs.reduce((sum, s) => sum + (s.totalScore || 0), 0) / studentAllSubs.length).toFixed(1))
+                            : Number(sub.totalScore.toFixed(1));
                           
                           pts.push({
                             id: `REAL-${sub.userId}-${sIdx}`,
@@ -1111,27 +1112,6 @@ export default function Admin() {
                   className={cn(
                     "w-12 h-6.5 rounded-full transition-all flex items-center p-0.5 cursor-pointer shrink-0 focus:outline-none",
                     siteSettings?.allowGuestView ? "bg-blue-600 justify-end" : "bg-slate-300 justify-start"
-                  )}
-                >
-                  <div className="w-5.5 h-5.5 rounded-full bg-white shadow-sm" />
-                </button>
-              </div>
-
-              {/* Toggle allowGuestVoteView */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 flex items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <span className="text-xs font-extrabold text-slate-800 block">비로그인 게스트 어려웠던 문제 결과 공개</span>
-                  <span className="text-[10px] text-slate-400 leading-tight block">비로그인 게스트에게도 체감 고난도 실시간 투표 비율 및 분포를 공개</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const updated = { ...siteSettings, allowGuestVoteView: siteSettings?.allowGuestVoteView === false ? true : false };
-                    saveSiteSettings(updated);
-                  }}
-                  className={cn(
-                    "w-12 h-6.5 rounded-full transition-all flex items-center p-0.5 cursor-pointer shrink-0 focus:outline-none",
-                    siteSettings?.allowGuestVoteView !== false ? "bg-blue-600 justify-end" : "bg-slate-300 justify-start"
                   )}
                 >
                   <div className="w-5.5 h-5.5 rounded-full bg-white shadow-sm" />
@@ -1355,7 +1335,7 @@ export default function Admin() {
                       </td>
                       <td className="px-8 py-5 text-sm font-medium text-slate-500">{sub.examId}</td>
                       <td className="px-8 py-5">
-                        <span className="text-lg font-black text-indigo-600">{sub.totalScore}점</span>
+                        <span className="text-lg font-black text-indigo-600">{Number(sub.totalScore).toFixed(1)}점</span>
                       </td>
                       <td className="px-8 py-5 text-xs font-medium text-slate-400">
                         {sub.isDummy ? '정밀 표본' : new Date(sub.submittedAt).toLocaleString()}
@@ -1407,7 +1387,7 @@ export default function Admin() {
                       {getDisplayName(selectedSubForDiagnostic.userId, !!selectedSubForDiagnostic.isDummy)} 학생의 상세 오답 분석표
                     </h3>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                      학번: {selectedSubForDiagnostic.userId} | 총 득점: {selectedSubForDiagnostic.totalScore}점
+                      학번: {selectedSubForDiagnostic.userId} | 총 득점: {Number(selectedSubForDiagnostic.totalScore).toFixed(1)}점
                     </p>
                   </div>
                 </div>

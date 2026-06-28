@@ -106,7 +106,8 @@ export default function Home() {
         if (subjectSubs.length > 0) {
           // 1st Grade Cut: Top 10%
           const index = Math.floor(subjectSubs.length * 0.1);
-          cuts[exam.id] = subjectSubs[Math.min(index, subjectSubs.length - 1)].totalScore;
+          const rawScore = subjectSubs[Math.min(index, subjectSubs.length - 1)].totalScore;
+          cuts[exam.id] = Number(rawScore.toFixed(1));
         } else {
           cuts[exam.id] = 0;
         }
@@ -139,29 +140,6 @@ export default function Home() {
     INITIAL_EXAMS.forEach(e => {
       if (!loadedStats[e.id]) {
         loadedStats[e.id] = {};
-        // High fidelity seeding of initial votes
-        if (e.id === 'exam-algebra') {
-          loadedStats[e.id][15] = 142;
-          loadedStats[e.id][20] = 110;
-          loadedStats[e.id][21] = 95;
-          loadedStats[e.id][14] = 48;
-          loadedStats[e.id][5] = 22;
-        } else if (e.id === 'exam-speech-lang') {
-          loadedStats[e.id][12] = 45;
-          loadedStats[e.id][18] = 38;
-          loadedStats[e.id][25] = 29;
-          loadedStats[e.id][5] = 12;
-        } else if (e.id === 'exam-physics') {
-          loadedStats[e.id][15] = 86;
-          loadedStats[e.id][20] = 75;
-          loadedStats[e.id][12] = 42;
-          loadedStats[e.id][11] = 19;
-        } else {
-          // General logical question seeding for other subjects
-          loadedStats[e.id][10] = Math.floor(Math.random() * 40 + 20);
-          loadedStats[e.id][15] = Math.floor(Math.random() * 50 + 30);
-          loadedStats[e.id][e.questionCount] = Math.floor(Math.random() * 30 + 15);
-        }
         modified = true;
       }
     });
@@ -441,11 +419,11 @@ export default function Home() {
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">예상 1등급 컷 점수</p>
                           <div className="text-5xl font-black text-indigo-950 tracking-tighter mb-2">
                             {isAdmin ? (
-                              <span>{scoreCut}점</span>
+                              <span>{typeof scoreCut === 'number' ? scoreCut.toFixed(1) : scoreCut}점</span>
                             ) : !isGradingVisible || !isStatsVisible ? (
                               <span className="text-2xl text-slate-400 font-bold">비공개</span>
                             ) : hasSubmitted ? (
-                              <span>{scoreCut}점</span>
+                              <span>{typeof scoreCut === 'number' ? scoreCut.toFixed(1) : scoreCut}점</span>
                             ) : (
                               <span>??점</span>
                             )}
@@ -495,197 +473,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Interactive Difficult Question Voting Block */}
-      {votingExams.length > 0 && (() => {
-        const isGuestVoteAllowed = siteSettings?.allowGuestVoteView !== false;
-        if (!user && !isGuestVoteAllowed) {
-          return (
-            <section className="max-w-5xl mx-auto px-4 pt-4">
-              <div className="bg-slate-50 border border-dashed border-slate-200 py-12 px-6 rounded-[36px] text-center max-w-5xl mx-auto">
-                <Lock size={28} className="mx-auto text-slate-350 mb-3" />
-                <h3 className="text-sm font-extrabold text-slate-700">어려웠던 문제 실시간 투표 비공개</h3>
-                <p className="text-[11px] text-slate-400 mt-1">이 가채점 통계는 비로그인 게스트에게 비공개 상태입니다. 로그인 후 결과를 열람하고 본인의 난이도 투표에 참여해 보세요.</p>
-              </div>
-            </section>
-          );
-        }
-
-        return (
-          <section className="max-w-5xl mx-auto px-4 space-y-8 pt-4">
-            <div className="text-center space-y-3">
-              <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center justify-center gap-2">
-                시험별 어려웠던 문제 실시간 투표
-              </h2>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-[36px] overflow-hidden shadow-xl shadow-slate-100/30 p-8 md:p-10 space-y-8">
-              
-              {/* Subject selector Dropdown Select */}
-              <div className="flex flex-col items-center justify-center border-b border-slate-100 pb-6">
-                <div className="w-full max-w-xs relative">
-                  <label htmlFor="vote-exam-select" className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 text-center">투표 대상 과목 선택</label>
-                  <select
-                    id="vote-exam-select"
-                    value={selectedVoteExamId}
-                    onChange={(e) => setSelectedVoteExamId(e.target.value)}
-                    className="w-full h-11 px-4 pr-10 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer appearance-none text-center shadow-sm"
-                  >
-                    {votingExams.map((item) => (
-                      <option key={`vote-opt-${item.id}`} value={item.id}>
-                        {item.title}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute right-4 bottom-3.5 pointer-events-none text-slate-400">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-                {/* Voting Grid Side */}
-                <div className="lg:col-span-7 space-y-5">
-                  <div className="flex justify-between items-center bg-slate-50 border border-slate-100 p-4 rounded-2xl">
-                    <span className="text-xs font-black text-slate-700">
-                      📍 {selectedExamObj.title} 문항 선택 (1~{selectedExamObj.questionCount}번)
-                    </span>
-                    <span className="text-[10px] font-bold text-indigo-600 uppercase bg-indigo-50 px-2.5 py-1 rounded">
-                      {!user ? "비로그인 (조회 전용)" : `투표 완료: ${activeUserVotedNums.length}개 선택됨`}
-                    </span>
-                  </div>
-
-                  {!user && (
-                    <div className="text-xs font-bold text-amber-600 bg-amber-50/50 border border-amber-100 p-4 rounded-2xl flex items-center gap-2">
-                      <Info size={16} className="text-amber-500 shrink-0" />
-                      <span>게스트 유저는 실시간 오답률 통계를 열람할 수만 있으며, 투표 체크는 로그인 시 활성화됩니다.</span>
-                    </div>
-                  )}
-
-                  {user ? (
-                    <div className="space-y-4">
-                      <div className="relative w-full max-w-sm mx-auto">
-                        <select
-                          value=""
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              handleToggleVote(Number(e.target.value));
-                            }
-                          }}
-                          className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer appearance-none text-center shadow-sm"
-                        >
-                          <option value="">어려웠던 문항 선택 추가/제거 (+)</option>
-                          {Array.from({ length: selectedExamObj.questionCount }, (_, idx) => idx + 1).map((qNum) => {
-                            const isVotedByMe = activeUserVotedNums.includes(qNum);
-                            return (
-                              <option key={`vote-opt-${qNum}`} value={qNum}>
-                                {qNum}번 문항 {isVotedByMe ? ' (투표됨 ✓)' : ''}
-                              </option>
-                            );
-                          })}
-                        </select>
-                        <div className="absolute right-4 bottom-3.5 pointer-events-none text-slate-400">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </div>
-                      </div>
-
-                      {activeUserVotedNums.length > 0 && (
-                        <div className="flex flex-wrap gap-2 pt-2 justify-center">
-                          {activeUserVotedNums.sort((a, b) => a - b).map(qNum => (
-                            <span key={`voted-tag-${qNum}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 border border-indigo-150 text-indigo-700 font-black text-xs rounded-full">
-                              {qNum}번 문항
-                              <button
-                                type="button"
-                                onClick={() => handleToggleVote(qNum)}
-                                className="w-4 h-4 rounded-full bg-indigo-100 hover:bg-indigo-200 text-indigo-750 flex items-center justify-center text-[10px] font-black"
-                              >
-                                ×
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="py-8 text-center text-slate-400 text-xs font-bold bg-slate-50 border border-slate-100 rounded-2xl">
-                      체감 고난도 문항 투표는 로그인 후 참여할 수 있습니다.
-                    </div>
-                  )}
-                </div>
-
-                {/* Real-time Votes Chart Side */}
-                <div className="lg:col-span-5 bg-slate-50 border border-slate-150 rounded-[32px] p-6 md:p-8 space-y-6">
-                  <div>
-                    <h4 className="text-sm font-black text-slate-800 flex items-center gap-1.5">
-                      <Vote size={16} className="text-indigo-600" />
-                      {selectedExamObj.title} 정밀 오답 투표 현황
-                    </h4>
-                    <p className="text-[10px] text-slate-400 mt-1 font-semibold leading-none">
-                      가장 많이 체크한 고난도 불문항 Top 5 실시간 통계
-                    </p>
-                  </div>
-
-                  <div className="space-y-4">
-                    {sortedVotedQuestions.length === 0 ? (
-                      <div className="py-12 text-center text-slate-400 text-xs font-bold space-y-2">
-                        <p>아직 등록된 오답 문항이 없습니다.</p>
-                        <p className="text-[10px] text-slate-300 font-medium">수강생 유저가 투표 시 문항 비율이 실시간 차트화됩니다.</p>
-                      </div>
-                    ) : (
-                      sortedVotedQuestions.map((row, index) => {
-                        const percentage = Math.min(100, Math.round((row.count / totalVotesCount) * 100)) || 0;
-                        const hasUserVotedThis = activeUserVotedNums.includes(row.number);
-                        
-                        return (
-                          <div key={`voted-row-${row.number}`} className="space-y-1.5">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-extrabold text-slate-700 flex items-center gap-1">
-                                <span className={cn(
-                                  "w-5 h-5 rounded-md text-[10px] font-black flex items-center justify-center text-white",
-                                  index === 0 ? "bg-red-500" :
-                                  index === 1 ? "bg-orange-500" : "bg-slate-400"
-                                )}>
-                                  {index + 1}
-                                </span>
-                                {row.number}번 문항 {hasUserVotedThis && <span className="text-[9px] font-black uppercase text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded ml-1">MY</span>}
-                              </span>
-                              <span className="font-semibold text-slate-500 font-mono text-[11px]">{row.count}표 ({percentage}%)</span>
-                            </div>
-                            
-                            {/* Progress bar representing votes density */}
-                            <div className="w-full h-3 bg-slate-200/50 rounded-full overflow-hidden">
-                              <motion.div
-                                initial={{ width: 0 }}
-                                animate={{ width: `${percentage}%` }}
-                                transition={{ duration: 0.8, ease: "easeOut" }}
-                                className={cn(
-                                  "h-full rounded-full",
-                                  index === 0 ? "bg-gradient-to-r from-red-500 to-orange-500" :
-                                  index === 1 ? "bg-gradient-to-r from-orange-400 to-amber-500" :
-                                  "bg-gradient-to-r from-slate-400 to-indigo-500"
-                                )}
-                              />
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-
-                  <div className="text-[10px] text-slate-400 leading-relaxed font-semibold bg-white/70 border border-slate-100 p-3.5 rounded-2xl flex gap-2">
-                    <Info size={14} className="text-slate-400 shrink-0 select-none mt-0.5" />
-                    <span>실시간 가채점 및 오답률 투표 결과이므로 공식 성적표 발표 시 오답 문항 분포가 달라질 수 있습니다.</span>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          </section>
-        );
-      })()}
     </motion.div>
   );
 }

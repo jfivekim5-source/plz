@@ -154,11 +154,11 @@ export default function ExamInput() {
         } else {
           // Direct point mapping inputted by student
           const userDefinedScore = Number(userAnswer) || 0;
-          score = userDefinedScore;
+          score = Number(userDefinedScore.toFixed(1));
           isCorrect = userDefinedScore > 0;
         }
 
-        totalScore += score;
+        totalScore = Number((totalScore + score).toFixed(1));
 
         return {
           number: num,

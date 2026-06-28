@@ -20,8 +20,9 @@ export default function Layout({ children }: LayoutProps) {
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200 group-hover:scale-105 transition-transform">
               <GraduationCap size={24} />
             </div>
-            <span className="text-xl font-bold tracking-tight text-slate-900">
+            <span className="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-1.5">
               등급컷<span className="text-indigo-600">.com</span>
+              <span className="text-[10px] bg-indigo-50 text-indigo-600 border border-indigo-100 font-extrabold px-1.5 py-0.5 rounded-md tracking-wider uppercase">Beta</span>
             </span>
           </Link>
 
@@ -62,8 +63,9 @@ export default function Layout({ children }: LayoutProps) {
       <footer className="border-t border-slate-200 bg-white py-12">
         <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-2">
-            <span className="text-lg font-bold tracking-tight text-slate-900">
+            <span className="text-lg font-bold tracking-tight text-slate-900 flex items-center gap-1.5">
               등급컷<span className="text-indigo-600">.com</span>
+              <span className="text-[9px] bg-slate-100 text-slate-500 border border-slate-200 font-extrabold px-1.5 py-0.5 rounded-md tracking-wider uppercase">Beta</span>
             </span>
           </div>
           <p className="text-sm text-slate-500 text-center md:text-left">

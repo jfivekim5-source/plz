@@ -232,7 +232,8 @@ export default function Results() {
     if (rankedList.length === 0) return { cut1: 0, cut2: 0, cut3: 0, cut4: 0, cut5: 0 };
     const getCutForPercentile = (p: number) => {
       const idx = Math.floor(rankedList.length * p);
-      return rankedList[Math.min(idx, rankedList.length - 1)]?.totalScore || 0;
+      const val = rankedList[Math.min(idx, rankedList.length - 1)]?.totalScore || 0;
+      return Number(val.toFixed(1));
     };
     return {
       cut1: getCutForPercentile(0.04), // 1등급 컷 (상위 4%)
@@ -244,20 +245,6 @@ export default function Results() {
   };
   const dynamicCuts = getGradeCuts();
 
-  const triggerSimulation = () => {
-    if (!examId) return;
-    const key = `exam_stats_stature_${examId}`;
-    const stored = localStorage.getItem(key);
-    if (stored) {
-      const data = JSON.parse(stored);
-      data.forceStable = true;
-      localStorage.setItem(key, JSON.stringify(data));
-    } else {
-      localStorage.setItem(key, JSON.stringify({ lastScore: currentLiveCut, lastChangedAt: Date.now() - 3600000, forceStable: true }));
-    }
-    window.location.reload();
-  };
-
   // Expected rankings visibility: "3등급 이하는 예상 등수 표시하지 않음"
   const isRankVisible = !(stats?.grade && stats.grade >= 3);
 
@@ -265,7 +252,7 @@ export default function Results() {
   const scoresArray = allSubmissions.map(s => s.totalScore || 0);
   const totalSubmissions = scoresArray.length || 1;
   const sumScores = scoresArray.reduce((acc, score) => acc + score, 0);
-  const averageScore = Math.round(sumScores / totalSubmissions);
+  const averageScore = Number((sumScores / totalSubmissions).toFixed(1));
   const maxScoreValue = scoresArray.length > 0 ? Math.max(...scoresArray) : 100;
 
   // Distribution buckets for the chart (represented cleanly based on actual respondents)
@@ -349,7 +336,7 @@ export default function Results() {
           </div>
           <div className="space-y-1">
             <p className="text-indigo-100 font-bold uppercase tracking-widest text-xs">나의 점수</p>
-            <h2 className="text-7xl font-black">{isGradingVisible ? `${submission.totalScore}점` : "비공개"}</h2>
+            <h2 className="text-7xl font-black">{isGradingVisible ? `${Number(submission.totalScore).toFixed(1)}점` : "비공개"}</h2>
           </div>
           <p className="text-indigo-100/80 text-sm font-medium">
             {isGradingVisible ? `${submission.answers.length}문항 중 ${correctCount}문항 정답` : "채점 결과 비공개 상태"}
@@ -546,16 +533,6 @@ export default function Results() {
                   </div>
                 )}
               </div>
-              {isGradingVisible && subConf.discloseStats !== false && (
-                <div className="pt-2">
-                  <button
-                    onClick={triggerSimulation}
-                    className="px-5 h-10 bg-indigo-50 border border-indigo-200 text-indigo-600 rounded-xl leading-none text-xs font-black hover:bg-indigo-100/50 transition-all active:scale-95"
-                  >
-                    ⚡ 시뮬레이션: 강제 공개 처리
-                  </button>
-                </div>
-              )}
             </div>
           ) : (
             <div className="space-y-12 animate-fade-in">
@@ -565,7 +542,7 @@ export default function Results() {
                   <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center font-bold">평</div>
                   <div>
                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">과목 전체 평균</span>
-                    <span className="text-2xl font-black text-slate-900">{averageScore}점</span>
+                    <span className="text-2xl font-black text-slate-900">{typeof averageScore === 'number' ? averageScore.toFixed(1) : averageScore}점</span>
                   </div>
                 </div>
 
@@ -573,7 +550,7 @@ export default function Results() {
                   <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center font-bold">최</div>
                   <div>
                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">최고 기록 점수</span>
-                    <span className="text-2xl font-black text-slate-900">{maxScoreValue}점</span>
+                    <span className="text-2xl font-black text-slate-900">{typeof maxScoreValue === 'number' ? maxScoreValue.toFixed(1) : maxScoreValue}점</span>
                   </div>
                 </div>
               </div>
@@ -667,7 +644,7 @@ export default function Results() {
                                       </div>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                      <span className="text-base font-black text-slate-900">{sub.totalScore}</span>
+                                      <span className="text-base font-black text-slate-900">{Number(sub.totalScore).toFixed(1)}</span>
                                       <span className="text-xs text-slate-400 ml-1">점</span>
                                     </td>
                                     <td className="px-6 py-4 text-center">

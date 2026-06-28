@@ -343,6 +343,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem(USERS_DB_KEY);
     localStorage.removeItem(RESULTS_DB_KEY);
     localStorage.removeItem('exam_app_real_submissions_v3');
+    localStorage.removeItem('exam_user_votes_v3');
+    localStorage.removeItem('exam_votes_stats_v3');
     
     // 2. Firestore reset (if not placeholder)
     if (!isPlaceholder && db) {
