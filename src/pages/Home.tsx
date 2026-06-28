@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowRight, CheckCircle2, BarChart3, MessageCircle, Flame, Vote, Sparkles, Award, Timer, Info, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
-import { ExamService, SubmissionService } from '@/src/services/dataService';
+import { ExamService, SubmissionService, SettingsService, getExamCapacity } from '@/src/services/dataService';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 const INITIAL_EXAMS = [
@@ -21,6 +21,7 @@ export default function Home() {
   const [exams, setExams] = useState<any[]>(INITIAL_EXAMS);
   const [gradeCuts, setGradeCuts] = useState<Record<string, number>>({});
   const [mySubmissions, setMySubmissions] = useState<Record<string, boolean>>({});
+  const [allSubmissions, setAllSubmissions] = useState<any[]>([]);
   const [slideIndex, setSlideIndex] = useState(0);
   const [selectedGradeExamId, setSelectedGradeExamId] = useState<string>('exam-algebra');
 
@@ -28,6 +29,23 @@ export default function Home() {
   const [selectedVoteExamId, setSelectedVoteExamId] = useState<string>('exam-algebra');
   const [userVotes, setUserVotes] = useState<Record<string, number[]>>({}); // userId_examId -> list of qNums
   const [votesStats, setVotesStats] = useState<Record<string, Record<number, number>>>({}); // examId -> { qNum: votesCount }
+  const [siteSettings, setSiteSettings] = useState<any>(() => {
+    const raw = localStorage.getItem('exam_app_site_settings_v3');
+    if (raw) {
+      try { return JSON.parse(raw); } catch {}
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    async function fetchSettings() {
+      const settings = await SettingsService.getSettings();
+      if (settings) {
+        setSiteSettings(settings);
+      }
+    }
+    fetchSettings();
+  }, []);
 
   // Clean up all 1st semester grade calculator cache
   useEffect(() => {
@@ -61,6 +79,7 @@ export default function Home() {
       // Total submissions (dummy + real ones) - Only fetch for selected subjects
       const selectedIds = userData?.selectedSubjects || [];
       const allSubs = await SubmissionService.getAllSubmissionsAcrossExams(selectedIds);
+      setAllSubmissions(allSubs);
       
       const cuts: Record<string, number> = {};
       const userSubmissionMap: Record<string, boolean> = {};
@@ -170,18 +189,19 @@ export default function Home() {
   // Filter voting exams by student's designated ones and check if voting is enabled
   const isAdmin = userData?.role === 'admin';
   const mySelectedSubjectsList = userData?.selectedSubjects || [];
-  
-  const siteSettings = (() => {
-    const raw = localStorage.getItem('exam_app_site_settings_v3');
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  })();
 
-  const baseVotingExams = (isAdmin || !user) ? exams : exams.filter(e => mySelectedSubjectsList.includes(e.id));
+  const baseVotingExams = (isAdmin || !user) 
+    ? exams.filter(e => {
+        if (isAdmin) return true;
+        const subConf = siteSettings?.subjects?.[e.id];
+        return !(subConf && subConf.discloseGrading === false);
+      })
+    : exams.filter(e => {
+        const isSelected = mySelectedSubjectsList.includes(e.id);
+        if (!isSelected) return false;
+        const subConf = siteSettings?.subjects?.[e.id];
+        return !(subConf && subConf.discloseGrading === false);
+      });
   const votingExams = baseVotingExams;
 
   // If currently selected tab is not in votingExams, auto-select the first available one to prevent mismatch
@@ -322,10 +342,18 @@ export default function Home() {
               const isAdmin = userData?.role === 'admin';
               const mySelectedSubjectsIds = userData?.selectedSubjects || [];
               const rotationExams = !user 
-                ? exams 
+                ? exams.filter(e => {
+                    const subConf = siteSettings?.subjects?.[e.id];
+                    return !(subConf && subConf.discloseGrading === false);
+                  })
                 : isAdmin 
                   ? exams 
-                  : exams.filter(e => mySelectedSubjectsIds.includes(e.id));
+                  : exams.filter(e => {
+                      const isSelected = mySelectedSubjectsIds.includes(e.id);
+                      if (!isSelected) return false;
+                      const subConf = siteSettings?.subjects?.[e.id];
+                      return !(subConf && subConf.discloseGrading === false);
+                    });
 
               if (rotationExams.length === 0) {
                 return (
@@ -343,6 +371,32 @@ export default function Home() {
               if (!activeGradeExam) return null;
               const hasSubmitted = !!mySubmissions[activeGradeExam.id];
               const scoreCut = gradeCuts[activeGradeExam.id] || 0;
+
+              const subConf = siteSettings?.subjects?.[activeGradeExam.id] || {
+                minResponseRate: activeGradeExam.id === 'exam-algebra' ? 100 : 40,
+                scoreChangeDiff: 1,
+                discloseGrading: true,
+                discloseStats: true,
+              };
+
+              const isGradingVisible = subConf.discloseGrading !== false || isAdmin;
+
+              const totalCapacity = getExamCapacity(activeGradeExam.id);
+              const subjectSubs = allSubmissions.filter(s => s.examId === activeGradeExam.id);
+              const realSubmissionsCount = subjectSubs.filter(s => !s.isDummy).length;
+              const responseRate = totalCapacity > 0 ? (realSubmissionsCount / totalCapacity) * 100 : 0;
+              const isResponseRateMet = responseRate >= (subConf.minResponseRate || 0);
+
+              const statsStatureKey = `exam_stats_stature_${activeGradeExam.id}`;
+              const statsStatureRaw = localStorage.getItem(statsStatureKey);
+              let isStatsForceStable = false;
+              if (statsStatureRaw) {
+                try {
+                  isStatsForceStable = JSON.parse(statsStatureRaw).forceStable === true;
+                } catch (e) {}
+              }
+
+              const isStatsVisible = isAdmin || (isGradingVisible && subConf.discloseStats !== false && (isResponseRateMet || isStatsForceStable));
 
               const handlePrev = () => {
                 const idx = rotationExams.findIndex(e => e.id === activeGradeExam.id);
@@ -386,7 +440,11 @@ export default function Home() {
                           </span>
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">예상 1등급 컷 점수</p>
                           <div className="text-5xl font-black text-indigo-950 tracking-tighter mb-2">
-                            {hasSubmitted || userData?.role === 'admin' ? (
+                            {isAdmin ? (
+                              <span>{scoreCut}점</span>
+                            ) : !isGradingVisible || !isStatsVisible ? (
+                              <span className="text-2xl text-slate-400 font-bold">비공개</span>
+                            ) : hasSubmitted ? (
                               <span>{scoreCut}점</span>
                             ) : (
                               <span>??점</span>
@@ -424,36 +482,17 @@ export default function Home() {
       </section>
 
       {/* Features Grid */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto px-4">
+      <section className="max-w-4xl mx-auto px-4">
         {/* Feature 1: 실시간 데이터 분석 */}
-        <div className="p-8 bg-white border border-slate-200 rounded-[32px] space-y-5 shadow-sm hover:border-indigo-100 transition-colors flex flex-col justify-center">
+        <div className="p-8 bg-white border border-slate-200 rounded-[32px] space-y-4 shadow-sm hover:border-indigo-100 transition-colors flex flex-col items-center text-center">
           <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-indigo-50">
             <BarChart3 className="text-indigo-600" size={24} />
           </div>
           <h3 className="text-xl font-bold text-slate-900">실시간 데이터 분석</h3>
-          <p className="text-slate-500 text-sm leading-relaxed">
-            사용자들의 데이터를 기반으로 보정하여 정확도 높은 등급컷을 산출합니다.
+          <p className="text-slate-500 text-sm leading-relaxed max-w-md">
+            사용자들의 응답 데이터를 기반으로 정밀 보정하여 오차를 최소화한 등급컷을 산출합니다.
           </p>
         </div>
-
-        {/* Feature 2: 시험 후기 게시판 */}
-        <Link 
-          to="/reviews"
-          className="p-8 bg-white border border-slate-200 hover:border-indigo-300 rounded-[32px] space-y-5 shadow-sm transition-all flex flex-col justify-between group text-left"
-        >
-          <div className="space-y-5">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-amber-50 group-hover:bg-amber-100 transition-colors">
-              <MessageCircle className="text-amber-600" size={24} />
-            </div>
-            <h3 className="text-xl font-bold text-slate-900">시험 후기 게시판</h3>
-            <p className="text-slate-500 text-sm leading-relaxed">
-              시험을 치르고 느꼈던 생생한 난이도와 후기를 공유하며 소통해 보세요.
-            </p>
-          </div>
-          <div className="pt-2 text-indigo-600 font-bold text-xs flex items-center gap-1.5 group-hover:translate-x-1 transition-transform">
-            시험 후기 쓰기 <ArrowRight size={14} />
-          </div>
-        </Link>
       </section>
 
       {/* Interactive Difficult Question Voting Block */}
@@ -524,28 +563,57 @@ export default function Home() {
                     </div>
                   )}
 
-                  <div className="flex flex-wrap gap-2.5">
-                    {Array.from({ length: selectedExamObj.questionCount }, (_, idx) => idx + 1).map((qNum) => {
-                      const isVotedByMe = activeUserVotedNums.includes(qNum);
-                      return (
-                        <button
-                          key={`vote-item-${selectedVoteExamId}-${qNum}`}
-                          type="button"
-                          disabled={!user}
-                          onClick={() => handleToggleVote(qNum)}
-                          className={cn(
-                            "w-12 h-12 rounded-2xl text-xs font-black transition-all border flex items-center justify-center cursor-pointer",
-                            isVotedByMe 
-                              ? "bg-indigo-600 border-indigo-600 text-white scale-110 shadow-lg shadow-indigo-150" 
-                              : "bg-slate-50 border-slate-150 text-slate-600 hover:border-indigo-300 hover:text-indigo-600",
-                            !user && "opacity-75 cursor-not-allowed hover:border-slate-150 hover:text-slate-600"
-                          )}
+                  {user ? (
+                    <div className="space-y-4">
+                      <div className="relative w-full max-w-sm mx-auto">
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              handleToggleVote(Number(e.target.value));
+                            }
+                          }}
+                          className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer appearance-none text-center shadow-sm"
                         >
-                          {qNum}
-                        </button>
-                      );
-                    })}
-                  </div>
+                          <option value="">어려웠던 문항 선택 추가/제거 (+)</option>
+                          {Array.from({ length: selectedExamObj.questionCount }, (_, idx) => idx + 1).map((qNum) => {
+                            const isVotedByMe = activeUserVotedNums.includes(qNum);
+                            return (
+                              <option key={`vote-opt-${qNum}`} value={qNum}>
+                                {qNum}번 문항 {isVotedByMe ? ' (투표됨 ✓)' : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <div className="absolute right-4 bottom-3.5 pointer-events-none text-slate-400">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </div>
+                      </div>
+
+                      {activeUserVotedNums.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-2 justify-center">
+                          {activeUserVotedNums.sort((a, b) => a - b).map(qNum => (
+                            <span key={`voted-tag-${qNum}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 border border-indigo-150 text-indigo-700 font-black text-xs rounded-full">
+                              {qNum}번 문항
+                              <button
+                                type="button"
+                                onClick={() => handleToggleVote(qNum)}
+                                className="w-4 h-4 rounded-full bg-indigo-100 hover:bg-indigo-200 text-indigo-750 flex items-center justify-center text-[10px] font-black"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="py-8 text-center text-slate-400 text-xs font-bold bg-slate-50 border border-slate-100 rounded-2xl">
+                      체감 고난도 문항 투표는 로그인 후 참여할 수 있습니다.
+                    </div>
+                  )}
                 </div>
 
                 {/* Real-time Votes Chart Side */}

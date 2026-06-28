@@ -18,11 +18,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { SubmissionService, GradeCalculator, ExamService, getExamCapacity } from '@/src/services/dataService';
+import { SubmissionService, GradeCalculator, ExamService, getExamCapacity, SettingsService } from '@/src/services/dataService';
 import { Question, Submission } from '@/src/types';
 
 export default function Admin() {
-  const { userData } = useAuth();
+  const { userData, resetDatabase } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'answers' | 'stats' | 'settings'>('overview');
   const [statsSubTab, setStatsSubTab] = useState<'summary' | 'rankings'>('summary');
   const [showAverageTrend, setShowAverageTrend] = useState<boolean>(false);
@@ -30,9 +30,24 @@ export default function Admin() {
   const [siteSettings, setSiteSettings] = useState(() => {
     const stored = localStorage.getItem('exam_app_site_settings_v3');
     if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
+      try { 
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.subjects) {
+          Object.keys(parsed.subjects).forEach(id => {
+            const sub = parsed.subjects[id];
+            if (sub.discloseStatus !== undefined) {
+              sub.discloseGrading = sub.discloseStatus === 'immediate';
+              sub.discloseStats = sub.discloseStatus === 'immediate';
+              delete sub.discloseStatus;
+            }
+            if (sub.discloseGrading === undefined) sub.discloseGrading = true;
+            if (sub.discloseStats === undefined) sub.discloseStats = true;
+          });
+        }
+        return parsed; 
+      } catch (e) {}
     }
-    const defaultSubjects: Record<string, { minResponseRate: number; scoreChangeDiff: number; discloseStatus: 'immediate' | 'disabled' }> = {};
+    const defaultSubjects: Record<string, { minResponseRate: number; scoreChangeDiff: number; discloseGrading: boolean; discloseStats: boolean }> = {};
     const subIds = [
       'exam-speech-lang', 'exam-algebra', 'exam-english1', 'exam-physics', 
       'exam-chemistry', 'exam-earth', 'exam-ai-basics', 'exam-ai-math'
@@ -41,7 +56,8 @@ export default function Admin() {
       defaultSubjects[id] = {
         minResponseRate: id === 'exam-algebra' ? 100 : 40,
         scoreChangeDiff: 1,
-        discloseStatus: 'immediate'
+        discloseGrading: true,
+        discloseStats: true
       };
     });
     return {
@@ -51,9 +67,19 @@ export default function Admin() {
     };
   });
 
+  useEffect(() => {
+    async function initSettings() {
+      const s = await SettingsService.getSettings();
+      if (s) {
+        setSiteSettings(s);
+      }
+    }
+    initSettings();
+  }, []);
+
   const saveSiteSettings = (updated: any) => {
     setSiteSettings(updated);
-    localStorage.setItem('exam_app_site_settings_v3', JSON.stringify(updated));
+    SettingsService.saveSettings(updated);
   };
 
   const [submissions, setSubmissions] = useState<any[]>([]);
@@ -639,15 +665,17 @@ export default function Admin() {
             <>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                 {/* Total scoring counts card with Dynamic response rate */}
-                {(() => {
+                 {(() => {
                   const capacity = getExamCapacity(selectedExamId);
-                  const responseRate = capacity > 0 ? (totalSubmissions / capacity) * 105 : 0;
+                  const realCount = currentSubjectSubmissions.filter(s => !s.isDummy).length;
+                  const responseRate = capacity > 0 ? (realCount / capacity) * 100 : 0;
                   const clampedRate = Math.min(100, responseRate);
                   return (
                     <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex flex-col justify-between">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">총 채점 집계 / 응답률</span>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">실제 응답 제출 수 / 응답률</span>
                       <div className="flex items-baseline gap-2">
-                        <span className="text-3xl font-black text-slate-900">{totalSubmissions}건</span>
+                        <span className="text-3xl font-black text-slate-900">{realCount}건</span>
+                        <span className="text-xs text-slate-400">/ 정원 {capacity}명</span>
                         <span className="text-sm font-bold text-indigo-600">({clampedRate.toFixed(1)}%)</span>
                       </div>
                     </div>
@@ -829,12 +857,13 @@ export default function Admin() {
               )}
 
               {/* Interactive Scatter plot score distribution (R Plot Style) */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-extrabold text-slate-800 font-sans tracking-tight">종합 학업 평균 대비 선택 과목 개별 성적 분포 분석</h4>
-                </div>
+              {selectedExamId === 'exam-algebra' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-extrabold text-slate-800 font-sans tracking-tight">종합 학업 평균 대비 선택 과목 개별 성적 분포 분석</h4>
+                  </div>
 
-                <div className="relative w-full bg-white border border-slate-200 rounded-[40px] p-6 md:p-8 flex flex-col justify-center select-none overflow-hidden shadow-sm">
+                  <div className="relative w-full bg-white border border-slate-200 rounded-[40px] p-6 md:p-8 flex flex-col justify-center select-none overflow-hidden shadow-sm">
                   {(() => {
                     const isAlgebra = selectedExamId === 'exam-algebra';
 
@@ -984,9 +1013,9 @@ export default function Admin() {
                                     key={pt.id}
                                     cx={cx}
                                     cy={cy}
-                                    r="3"
-                                    fill={pt.isReal ? "#4f46e5" : "#334155"}
-                                    opacity="0.6"
+                                    r="3.5"
+                                    fill="#dc2626"
+                                    opacity="0.75"
                                   />
                                 );
                               })}
@@ -1004,11 +1033,7 @@ export default function Admin() {
                               )}
                             </g>
 
-                            {!isAlgebra && (
-                              <text x={padL + plotW / 2} y={padT + plotH / 2} className="text-xs text-slate-400 font-black" textAnchor="middle">
-                                대수(Algebra) 과목만 정밀 학업 분포 상태를 제공합니다.
-                              </text>
-                            )}
+                            {null}
                           </svg>
                         </div>
                       </div>
@@ -1016,6 +1041,7 @@ export default function Admin() {
                   })()}
                 </div>
               </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
                 <div className="space-y-4">
@@ -1065,8 +1091,8 @@ export default function Admin() {
           {/* Global Configuration Toggles */}
           <div className="space-y-4 bg-slate-50 p-6 md:p-8 rounded-[32px] border border-slate-200/60">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
-              <h4 className="text-xs font-black text-slate-650 uppercase tracking-widest">글로벌 게스트 공개 정책 설정</h4>
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+              <h4 className="text-xs font-black text-blue-600 uppercase tracking-widest">게스트 공개 정책 설정</h4>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
@@ -1084,7 +1110,7 @@ export default function Admin() {
                   }}
                   className={cn(
                     "w-12 h-6.5 rounded-full transition-all flex items-center p-0.5 cursor-pointer shrink-0 focus:outline-none",
-                    siteSettings.allowGuestView ? "bg-indigo-650 justify-end" : "bg-slate-300 justify-start"
+                    siteSettings.allowGuestView ? "bg-blue-600 justify-end" : "bg-slate-300 justify-start"
                   )}
                 >
                   <div className="w-5.5 h-5.5 rounded-full bg-white shadow-sm" />
@@ -1105,12 +1131,45 @@ export default function Admin() {
                   }}
                   className={cn(
                     "w-12 h-6.5 rounded-full transition-all flex items-center p-0.5 cursor-pointer shrink-0 focus:outline-none",
-                    siteSettings.allowGuestVoteView !== false ? "bg-indigo-650 justify-end" : "bg-slate-300 justify-start"
+                    siteSettings.allowGuestVoteView !== false ? "bg-blue-600 justify-end" : "bg-slate-300 justify-start"
                   )}
                 >
                   <div className="w-5.5 h-5.5 rounded-full bg-white shadow-sm" />
                 </button>
               </div>
+            </div>
+          </div>
+
+          {/* Database Administration Section */}
+          <div className="space-y-4 bg-red-50/50 p-6 md:p-8 rounded-[32px] border border-red-200/50">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+              <h4 className="text-xs font-black text-red-600 uppercase tracking-widest">데이터베이스 관리</h4>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-red-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+              <div className="space-y-1">
+                <span className="text-xs font-extrabold text-slate-800 block">시스템 초기화 및 434개 신규 계정 일괄 생성</span>
+                <span className="text-[10px] text-slate-400 leading-tight block">
+                  관리자 계정 제외 모든 기존 학생 계정 및 가출제 답안 데이터를 완전 초기화하고, 20n01~20n31 및 21m01~21m31 신규 학생 계정(총 434개)을 배포합니다.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (window.confirm("정말로 데이터베이스를 초기화하시겠습니까?\n이 작업은 되돌릴 수 없으며 관리자 계정을 제외한 모든 데이터가 완전 삭제됩니다.")) {
+                    try {
+                      await resetDatabase();
+                      alert("데이터베이스 초기화 및 신규 학생 계정 생성이 완료되었습니다.");
+                    } catch (e) {
+                      alert("초기화 중 오류가 발생했습니다.");
+                    }
+                  }
+                }}
+                className="px-5 h-10 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm shadow-red-200 cursor-pointer shrink-0 focus:outline-none"
+              >
+                관리자 제외 전체 초기화
+              </button>
             </div>
           </div>
 
@@ -1126,7 +1185,8 @@ export default function Admin() {
                 const subConf = siteSettings.subjects[exam.id] || { 
                    minResponseRate: 40, 
                    scoreChangeDiff: 1, 
-                   discloseStatus: 'immediate',
+                   discloseGrading: true,
+                   discloseStats: true,
                    allowGuestView: false
                 };
                 
@@ -1144,19 +1204,35 @@ export default function Admin() {
 
                 return (
                   <div key={exam.id} className="bg-slate-50/50 p-6 rounded-3xl border border-slate-200/60 space-y-4">
-                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                    <div className="flex justify-between items-start border-b border-slate-100 pb-3">
                       <div>
                         <span className="font-extrabold text-slate-950 text-sm block">{exam.title}</span>
                         <span className="text-[10px] text-slate-400 font-bold block">{exam.subject}</span>
                       </div>
-                      <select
-                        value={subConf.discloseStatus}
-                        onChange={(e) => updateSubConfig('discloseStatus', e.target.value)}
-                        className="text-xs font-bold border border-slate-200 bg-white rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500 cursor-pointer"
-                      >
-                        <option value="immediate">공개하기</option>
-                        <option value="disabled">공개 끄기</option>
-                      </select>
+                      <div className="flex gap-2">
+                        <div className="flex flex-col items-end">
+                          <span className="text-[9px] font-bold text-slate-400 mb-0.5">채점 공개</span>
+                          <select
+                            value={subConf.discloseGrading !== false ? 'immediate' : 'disabled'}
+                            onChange={(e) => updateSubConfig('discloseGrading', e.target.value === 'immediate')}
+                            className="text-xs font-bold border border-slate-200 bg-white rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                          >
+                            <option value="immediate">공개</option>
+                            <option value="disabled">비공개</option>
+                          </select>
+                        </div>
+                        <div className="flex flex-col items-end">
+                          <span className="text-[9px] font-bold text-slate-400 mb-0.5">통계 공개</span>
+                          <select
+                            value={subConf.discloseStats !== false ? 'immediate' : 'disabled'}
+                            onChange={(e) => updateSubConfig('discloseStats', e.target.value === 'immediate')}
+                            className="text-xs font-bold border border-slate-200 bg-white rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                          >
+                            <option value="immediate">공개</option>
+                            <option value="disabled">비공개</option>
+                          </select>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Min Response Rate Slider (Step 10%) */}

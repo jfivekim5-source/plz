@@ -276,7 +276,10 @@ export const ExamService = {
       if (!Array.isArray(list)) list = [];
       const mergedList = [...INITIAL_EXAMS];
       list.forEach((e: any) => {
-        if (!mergedList.some((ie) => ie.id === e.id)) {
+        const existingIdx = mergedList.findIndex((ie) => ie.id === e.id);
+        if (existingIdx !== -1) {
+          mergedList[existingIdx] = { ...mergedList[existingIdx], ...e };
+        } else {
           mergedList.push(e);
         }
       });
@@ -291,7 +294,10 @@ export const ExamService = {
       const mergedList = [...INITIAL_EXAMS];
       
       dbExams.forEach((e: any) => {
-        if (!mergedList.some((ie) => ie.id === e.id)) {
+        const existingIdx = mergedList.findIndex((ie) => ie.id === e.id);
+        if (existingIdx !== -1) {
+          mergedList[existingIdx] = { ...mergedList[existingIdx], ...e };
+        } else {
           mergedList.push(e);
         }
       });
@@ -341,36 +347,128 @@ export const ExamService = {
   async saveQuestions(examId: string, questions: Question[]): Promise<void> {
     localStorage.setItem(`custom_questions_${examId}`, JSON.stringify(questions));
 
-    // Recalculate and update existing real submissions for this exam!
-    const saved = localStorage.getItem(REAL_SUBMISSIONS_KEY);
-    if (saved) {
-      const submissions: Submission[] = JSON.parse(saved);
-      const updatedSubmissions = submissions.map(sub => {
-        if (sub.examId !== examId) return sub;
+    // Update in-memory cache
+    questionsCache[examId] = questions;
 
-        let totalScore = 0;
-        const updatedAnswers = sub.answers.map(ans => {
-          const q = questions.find(item => item.number === ans.number);
-          if (!q) return ans;
+    // Update the exam's questionCount in memory, local storage, and Firestore
+    if (cachedExams) {
+      const exam = cachedExams.find(e => e.id === examId);
+      if (exam) {
+        exam.questionCount = questions.length;
+      }
+    }
 
-          if (q.type === 'multiple') {
-            const isCorrect = q.answer === ans.userAnswer;
-            const score = isCorrect ? q.score : 0;
-            totalScore += score;
-            return { ...ans, isCorrect, score };
-          } else {
-            totalScore += ans.score;
-            return ans;
+    const savedExams = localStorage.getItem(EXAMS_KEY);
+    if (savedExams) {
+      try {
+        const exams = JSON.parse(savedExams);
+        const exam = exams.find((e: any) => e.id === examId);
+        if (exam) {
+          exam.questionCount = questions.length;
+          localStorage.setItem(EXAMS_KEY, JSON.stringify(exams));
+        } else {
+          const initExam = INITIAL_EXAMS.find(e => e.id === examId);
+          if (initExam) {
+            exams.push({ ...initExam, questionCount: questions.length });
+            localStorage.setItem(EXAMS_KEY, JSON.stringify(exams));
           }
-        });
+        }
+      } catch (e) {}
+    } else {
+      const initExam = INITIAL_EXAMS.find(e => e.id === examId);
+      if (initExam) {
+        localStorage.setItem(EXAMS_KEY, JSON.stringify([{ ...initExam, questionCount: questions.length }]));
+      }
+    }
 
-        return {
-          ...sub,
-          answers: updatedAnswers,
-          totalScore
-        };
+    if (!isPlaceholder && db) {
+      try {
+        const examRef = doc(db!, 'exams', examId);
+        await setDoc(examRef, { questionCount: questions.length }, { merge: true });
+      } catch (error) {
+        console.error('Failed to update exam questionCount in Firestore', error);
+      }
+    }
+
+    // Clear submissions cache to force re-computation of rankings
+    delete submissionsCache[examId];
+    cachedExams = null; // Force reload of exams from source to get updated questionCount
+
+    // Recalculate and update existing real submissions for this exam!
+    let realSubs: Submission[] = [];
+    if (!isPlaceholder && db) {
+      try {
+        const snapshot = await getDocs(collection(db, 'exams', examId, 'submissions'));
+        if (!snapshot.empty) {
+          realSubs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), isDummy: false } as any as Submission));
+        }
+      } catch (error) {
+        console.warn('Firestore fetch failed for recalculation, using local', error);
+      }
+    }
+
+    if (realSubs.length === 0) {
+      const saved = localStorage.getItem(REAL_SUBMISSIONS_KEY);
+      if (saved) {
+        realSubs = JSON.parse(saved).filter((s: Submission) => s.examId === examId);
+      }
+    }
+
+    const updatedRealSubs = realSubs.map(sub => {
+      let totalScore = 0;
+      const updatedAnswers = sub.answers.map(ans => {
+        const q = questions.find(item => item.number === ans.number);
+        if (!q) return ans;
+
+        if (q.type === 'multiple') {
+          const isCorrect = q.answer === ans.userAnswer;
+          const score = isCorrect ? q.score : 0;
+          totalScore += score;
+          return { ...ans, isCorrect, score };
+        } else {
+          const userDefinedScore = Number(ans.userAnswer) || 0;
+          const score = Math.min(q.score, userDefinedScore);
+          totalScore += score;
+          return { ...ans, isCorrect: score > 0, score };
+        }
       });
-      localStorage.setItem(REAL_SUBMISSIONS_KEY, JSON.stringify(updatedSubmissions));
+
+      return {
+        ...sub,
+        answers: updatedAnswers,
+        totalScore
+      };
+    });
+
+    // Save to local storage
+    const allLocalSaved = localStorage.getItem(REAL_SUBMISSIONS_KEY);
+    let allLocalSubs: Submission[] = [];
+    if (allLocalSaved) {
+      allLocalSubs = JSON.parse(allLocalSaved).filter((s: Submission) => s.examId !== examId);
+    }
+    allLocalSubs.push(...updatedRealSubs);
+    localStorage.setItem(REAL_SUBMISSIONS_KEY, JSON.stringify(allLocalSubs));
+
+    if (!isPlaceholder && db) {
+      try {
+        // Save questions to Firestore
+        await Promise.all(
+          questions.map(q => 
+            setDoc(doc(db!, 'exams', examId, 'questions', q.id || `Q-${q.number}`), q)
+          )
+        );
+
+        // Update real submissions on Firestore
+        if (updatedRealSubs.length > 0) {
+          await Promise.all(
+            updatedRealSubs.map(sub =>
+              setDoc(doc(db!, 'exams', examId, 'submissions', sub.userId), sub)
+            )
+          );
+        }
+      } catch (error) {
+        console.error('Firestore saveQuestions / submissions recalculation failed', error);
+      }
     }
   },
 
@@ -426,9 +524,8 @@ export const ExamService = {
 
     if (isPlaceholder) {
       const seedList = generateMockQuestions(examId);
-      const finalSeed = examId === 'exam-algebra' ? seedList.map(q => ({ ...q, answer: '1' })) : seedList;
-      questionsCache[examId] = finalSeed;
-      return finalSeed;
+      questionsCache[examId] = seedList;
+      return seedList;
     }
     if (!db) return [];
     try {
@@ -441,20 +538,17 @@ export const ExamService = {
             setDoc(doc(db!, 'exams', examId, 'questions', q.id), q).catch(() => {})
           )
         ).catch(() => {});
-        const finalSec = examId === 'exam-algebra' ? seedList.map(q => ({ ...q, answer: '1' })) : seedList;
-        questionsCache[examId] = finalSec;
-        return finalSec;
+        questionsCache[examId] = seedList;
+        return seedList;
       }
       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question));
-      const finalList = examId === 'exam-algebra' ? list.map(q => ({ ...q, answer: '1' })) : list;
-      questionsCache[examId] = finalList;
-      return finalList;
+      questionsCache[examId] = list;
+      return list;
     } catch (error) {
       console.error('getQuestions failed', error);
       const seedList = generateMockQuestions(examId);
-      const finalErr = examId === 'exam-algebra' ? seedList.map(q => ({ ...q, answer: '1' })) : seedList;
-      questionsCache[examId] = finalErr;
-      return finalErr;
+      questionsCache[examId] = seedList;
+      return seedList;
     }
   }
 };
@@ -466,13 +560,17 @@ const submissionsCache: Record<string, Submission[]> = {};
 
 const EXAM_MEMBERS_MAP: Record<string, number> = {
   'exam-speech-lang': 396,
-  'exam-algebra': 200,
+  'exam-algebra': 396,
   'exam-english1': 396,
   'exam-physics': 215,
   'exam-chemistry': 216,
   'exam-earth': 148,
   'exam-ai-basics': 186,
   'exam-ai-math': 120,
+};
+
+export const isExamSupported = (examId: string): boolean => {
+  return Object.prototype.hasOwnProperty.call(EXAM_MEMBERS_MAP, examId);
 };
 
 export const getExamCapacity = (examId: string): number => {
@@ -530,13 +628,25 @@ export const SubmissionService = {
 
   generateMockStudentIds(capacity: number): string[] {
     const pool: string[] = [];
-    for (let c = 1; c <= 14; c++) {
-      for (let s = 1; s <= 30; s++) {
-        const classStr = c.toString().padStart(2, '0');
-        const numStr = s.toString().padStart(2, '0');
-        pool.push(`2${classStr}${numStr}`);
+    
+    // 1. 20101 ~ 20931 (n is 1 to 9, idx is 1 to 31)
+    for (let n = 1; n <= 9; n++) {
+      for (let idx = 1; idx <= 31; idx++) {
+        const classStr = n.toString();
+        const idxStr = idx.toString().padStart(2, '0');
+        pool.push(`20${classStr}${idxStr}`);
       }
     }
+    
+    // 2. 21001 ~ 21431 (m is 0 to 4, idx is 1 to 31)
+    for (let m = 0; m <= 4; m++) {
+      for (let idx = 1; idx <= 31; idx++) {
+        const classStr = m.toString();
+        const idxStr = idx.toString().padStart(2, '0');
+        pool.push(`21${classStr}${idxStr}`);
+      }
+    }
+    
     // High-performance slice to avoid expensive repeated array splicing
     return pool.slice(0, capacity);
   },
@@ -638,15 +748,24 @@ export const SubmissionService = {
       const listCopy = [...dummyList];
       for (let r = 0; r < realCount; r++) {
         const realSub = realSubs[r];
-        const zeroIndex = listCopy.findIndex(d => d.isDummy && d.totalScore === 0);
-        if (zeroIndex !== -1) {
-          listCopy[zeroIndex] = realSub;
+        const cleanRealId = realSub.userId.replace(/^26-/, '');
+        
+        // Find if there is a dummy submission with this exact student ID
+        const matchIndex = listCopy.findIndex(d => d.isDummy && d.userId === cleanRealId);
+        if (matchIndex !== -1) {
+          listCopy[matchIndex] = realSub;
         } else {
-          const anyDummyIndex = listCopy.findIndex(d => d.isDummy);
-          if (anyDummyIndex !== -1) {
-            listCopy[anyDummyIndex] = realSub;
+          // Fallback to replacing any zero-score or any dummy
+          const zeroIndex = listCopy.findIndex(d => d.isDummy && d.totalScore === 0);
+          if (zeroIndex !== -1) {
+            listCopy[zeroIndex] = realSub;
           } else {
-            listCopy.push(realSub);
+            const anyDummyIndex = listCopy.findIndex(d => d.isDummy);
+            if (anyDummyIndex !== -1) {
+              listCopy[anyDummyIndex] = realSub;
+            } else {
+              listCopy.push(realSub);
+            }
           }
         }
       }
@@ -702,3 +821,76 @@ export const GradeCalculator = {
     };
   }
 };
+
+export const SettingsService = {
+  async getSettings(): Promise<any> {
+    const defaultSubjects: Record<string, { minResponseRate: number; scoreChangeDiff: number; discloseGrading: boolean; discloseStats: boolean }> = {};
+    const subIds = [
+      'exam-speech-lang', 'exam-algebra', 'exam-english1', 'exam-physics', 
+      'exam-chemistry', 'exam-earth', 'exam-ai-basics', 'exam-ai-math'
+    ];
+    subIds.forEach(id => {
+      defaultSubjects[id] = {
+        minResponseRate: id === 'exam-algebra' ? 100 : 40,
+        scoreChangeDiff: 1,
+        discloseGrading: true,
+        discloseStats: true
+      };
+    });
+    const defaultSettings = {
+      allowGuestView: false,
+      allowGuestVoteView: true,
+      subjects: defaultSubjects
+    };
+
+    // 1. Try Firestore if not placeholder
+    if (!isPlaceholder && db) {
+      try {
+        const snap = await getDoc(doc(db, 'settings', 'site'));
+        if (snap.exists()) {
+          const parsed = snap.data();
+          if (parsed && parsed.subjects) {
+            Object.keys(parsed.subjects).forEach(id => {
+              const sub = parsed.subjects[id];
+              if (sub.discloseGrading === undefined) sub.discloseGrading = true;
+              if (sub.discloseStats === undefined) sub.discloseStats = true;
+            });
+          }
+          return parsed;
+        }
+      } catch (error) {
+        console.error('Firestore load settings failed', error);
+      }
+    }
+
+    // 2. Fall back to local storage
+    const stored = localStorage.getItem('exam_app_site_settings_v3');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.subjects) {
+          Object.keys(parsed.subjects).forEach(id => {
+            const sub = parsed.subjects[id];
+            if (sub.discloseGrading === undefined) sub.discloseGrading = true;
+            if (sub.discloseStats === undefined) sub.discloseStats = true;
+          });
+        }
+        return parsed;
+      } catch (e) {}
+    }
+
+    return defaultSettings;
+  },
+
+  async saveSettings(settings: any): Promise<void> {
+    localStorage.setItem('exam_app_site_settings_v3', JSON.stringify(settings));
+    if (!isPlaceholder && db) {
+      try {
+        await setDoc(doc(db, 'settings', 'site'), settings);
+      } catch (error) {
+        console.error('Firestore save settings failed', error);
+      }
+    }
+  }
+};
+

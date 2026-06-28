@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { GraduationCap, Send, ChevronLeft, Filter, RefreshCw, CheckSquare, AlertCircle } from 'lucide-react';
+import { GraduationCap, Send, ChevronLeft, ChevronDown, Filter, RefreshCw, CheckSquare, AlertCircle } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { Exam, Question, Submission } from '@/src/types';
-import { ExamService, SubmissionService } from '@/src/services/dataService';
+import { ExamService, SubmissionService, isExamSupported } from '@/src/services/dataService';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export default function ExamInput() {
@@ -95,6 +95,9 @@ export default function ExamInput() {
   };
 
   const isChoiceQuestion = (qNum: number) => {
+    const foundQ = questions.find(item => item.number === qNum);
+    if (foundQ) return foundQ.type === 'multiple';
+
     if (!exam) return true;
     if (exam.id === 'exam-speech-lang') return true;
     if (exam.id === 'exam-algebra') return qNum <= 15;
@@ -139,7 +142,7 @@ export default function ExamInput() {
         const num = i + 1;
         const userAnswer = answers[num] || '';
         const question = questions.find(q => q.number === num);
-        const maxScore = getQuestionMaxScore(num);
+        const maxScore = question && typeof question.score === 'number' ? question.score : getQuestionMaxScore(num);
 
         let isCorrect = false;
         let score = 0;
@@ -186,6 +189,27 @@ export default function ExamInput() {
   if (authLoading) return <div className="p-12 text-center text-slate-400">학적 확인 중...</div>;
   if (!userData) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (examId && !isExamSupported(examId)) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center p-8 max-w-md mx-auto text-center space-y-4">
+        <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center">
+          <AlertCircle size={32} />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900">미지원 과목입니다</h2>
+        <p className="text-sm text-slate-500">
+          선택하신 과목은 현재 등급컷.com에서 정밀 분석을 지원하지 않는 과목입니다. 
+          지원 대상 과목만 입력해 주시기 바랍니다.
+        </p>
+        <button 
+          onClick={() => navigate('/exams')}
+          className="h-11 px-6 bg-slate-900 hover:bg-black text-white rounded-xl font-semibold text-sm transition-all"
+        >
+          배정 과목 목록으로 이동
+        </button>
+      </div>
+    );
   }
 
   if (loading) return <div className="p-12 text-center text-slate-400">시험 정보와 이전 저장 답안을 불러오고 있습니다...</div>;
@@ -383,32 +407,74 @@ export default function ExamInput() {
                         })}
                       </div>
                     </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <p className="text-[11px] font-bold text-slate-400/80 mb-1">자신이 획득한 부분 점수 직접입력</p>
-                      <div className="flex flex-wrap gap-1.5 justify-center">
-                        {Array.from({ length: maxScore + 1 }, (_, scoreIdx) => scoreIdx).map((scoreVal) => {
-                          const scoreStr = scoreVal.toString();
-                          const isPicked = answers[qNum] === scoreStr;
-                          return (
-                            <button
-                              key={`score-pick-${qNum}-${scoreVal}`}
-                              type="button"
-                              onClick={() => handleSubjectiveScoreSelect(qNum, scoreStr)}
-                              className={cn(
-                                "h-9 px-3 rounded-xl font-bold text-xs transition-colors border",
-                                isPicked 
-                                  ? "bg-indigo-600 border-indigo-600 text-white scale-105 shadow" 
-                                  : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-                              )}
+                  ) : (() => {
+                    const currentValStr = answers[qNum] || '0.0';
+                    const [aStr, bStr] = currentValStr.includes('.') ? currentValStr.split('.') : [currentValStr, '0'];
+                    const aVal = parseInt(aStr, 10) || 0;
+                    const bVal = parseInt(bStr, 10) || 0;
+
+                    const handleAChange = (aValNew: number) => {
+                      let bValNew = bVal;
+                      if (aValNew === maxScore) {
+                        bValNew = 0;
+                      }
+                      handleSubjectiveScoreSelect(qNum, `${aValNew}.${bValNew}`);
+                    };
+
+                    const handleBChange = (bValNew: number) => {
+                      let activeA = aVal;
+                      if (activeA === maxScore) {
+                        bValNew = 0;
+                      }
+                      handleSubjectiveScoreSelect(qNum, `${activeA}.${bValNew}`);
+                    };
+
+                    return (
+                      <div className="space-y-2 flex flex-col items-center">
+                        <div className="flex items-center gap-1.5 justify-center">
+                          <div className="relative">
+                            <select
+                              value={aVal}
+                              onChange={(e) => handleAChange(Number(e.target.value))}
+                              className="h-10 pl-3 pr-8 bg-slate-55 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-indigo-550 cursor-pointer appearance-none text-center"
                             >
-                              {scoreVal}점
-                            </button>
-                          );
-                        })}
+                              {Array.from({ length: maxScore + 1 }, (_, i) => i).map((val) => (
+                                <option key={`int-${qNum}-${val}`} value={val}>
+                                  {val}점
+                                </option>
+                              ))}
+                            </select>
+                            <div className="absolute right-2 top-3 pointer-events-none text-slate-400">
+                              <ChevronDown size={12} />
+                            </div>
+                          </div>
+
+                          <span className="text-base font-black text-slate-400">.</span>
+
+                          <div className="relative">
+                            <select
+                              value={bVal}
+                              onChange={(e) => handleBChange(Number(e.target.value))}
+                              className="h-10 pl-3 pr-8 bg-slate-55 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-indigo-555 cursor-pointer appearance-none text-center"
+                            >
+                              {aVal === maxScore ? (
+                                <option value={0}>0</option>
+                              ) : (
+                                Array.from({ length: 10 }, (_, i) => i).map((val) => (
+                                  <option key={`dec-${qNum}-${val}`} value={val}>
+                                    {val}
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                            <div className="absolute right-2 top-3 pointer-events-none text-slate-400">
+                              <ChevronDown size={12} />
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </motion.div>
             );

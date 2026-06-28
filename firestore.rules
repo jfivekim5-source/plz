@@ -29,8 +29,7 @@ service cloud.firestore {
 
     // User profile rules
     match /users/{userId} {
-      allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin();
+      allow read, write: if true;
     }
 
     // Exam rules
@@ -45,13 +44,18 @@ service cloud.firestore {
       
       match /submissions/{userId} {
         allow read: if true; // Publicly readable
-        allow create, update: if true; // Publicly writable
+        allow write: if true; // Publicly writable (allows create, update, delete)
       }
     }
 
     // Review rules
     match /reviews/{reviewId} {
       allow read, write: if true; // Allow reading and writing of reviews
+    }
+
+    // Settings rules
+    match /settings/{settingsId} {
+      allow read, write: if true; // Allow reading and writing of settings
     }
   }
 }

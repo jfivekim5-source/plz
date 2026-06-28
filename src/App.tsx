@@ -54,7 +54,6 @@ import ExamInput from './pages/ExamInput';
 import Results from './pages/Results';
 import Admin from './pages/Admin';
 import Settings from './pages/Settings';
-import Reviews from './pages/Reviews';
 
 export default function App() {
   // Silent high-performance background warming flow
@@ -80,7 +79,6 @@ export default function App() {
             <Route path="/exams" element={<ExamList />} />
             <Route path="/exams/:examId" element={<ExamInput />} />
             <Route path="/results" element={<Results />} />
-            <Route path="/reviews" element={<Reviews />} />
             <Route path="/settings" element={<Settings />} />
             
             <Route path="/admin" element={

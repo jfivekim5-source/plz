@@ -34,6 +34,10 @@ export default function Settings() {
       alert('비밀번호는 최소 4자 이상이어야 합니다.');
       return;
     }
+    if (newPass === '1234') {
+      alert("임시 비밀번호('1234') 외의 다른 비밀번호를 설정해 주세요.");
+      return;
+    }
     try {
       await setupPassword(newPass);
       setSavedPass(true);

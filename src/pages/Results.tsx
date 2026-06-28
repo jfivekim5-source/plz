@@ -11,12 +11,15 @@ import {
   TrendingUp,
   Users,
   PieChart,
-  Grid
+  Grid,
+  AlertCircle
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
-import { SubmissionService, GradeCalculator, ExamService } from '@/src/services/dataService';
+import { SubmissionService, GradeCalculator, ExamService, isExamSupported, getExamCapacity, SettingsService } from '@/src/services/dataService';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { Submission, Question } from '@/src/types';
+import { db, isPlaceholder } from '@/src/lib/firebase';
+import { getDocs, collection } from 'firebase/firestore';
 
 export default function Results() {
   const [searchParams] = useSearchParams();
@@ -29,6 +32,7 @@ export default function Results() {
   const [subTab, setSubTab] = useState<'answers' | 'stats'>('answers');
   const [loading, setLoading] = useState(true);
   const [selectedDotSub, setSelectedDotSub] = useState<any | null>(null);
+  const [siteSettings, setSiteSettings] = useState<any>(null);
 
   const { user, userData, loading: authLoading } = useAuth();
   const searchUserId = searchParams.get('userId');
@@ -48,12 +52,15 @@ export default function Results() {
     async function loadResults() {
       if (!examId || !effectiveUserId) return;
       try {
-        const [sub, allSubs, qs, examsList] = await Promise.all([
+        const [sub, allSubs, qs, examsList, settings] = await Promise.all([
           SubmissionService.getMySubmission(examId, effectiveUserId),
           SubmissionService.getAllSubmissions(examId),
           ExamService.getQuestions(examId),
-          ExamService.getExams()
+          ExamService.getExams(),
+          SettingsService.getSettings()
         ]);
+
+        setSiteSettings(settings);
 
         if (sub) {
           const activeExam = examsList.find(e => e.id === examId);
@@ -78,11 +85,23 @@ export default function Results() {
           setMyAllAvg(calculatedAvg);
         }
 
-        // Load internal users DB for detailed nickname mappings
-        const dbStr = localStorage.getItem('exam_app_users_db');
-        if (dbStr) {
-          setUsersMap(JSON.parse(dbStr));
+        // Load internal users DB for detailed nickname mappings and privacy settings from Firestore & Local
+        let firestoreUsers: Record<string, any> = {};
+        if (!isPlaceholder && db) {
+          try {
+            const querySnap = await getDocs(collection(db, 'users'));
+            querySnap.forEach((doc) => {
+              firestoreUsers[doc.id] = doc.data();
+            });
+          } catch (e) {
+            console.error("Failed to load users from Firestore in Results", e);
+          }
         }
+
+        const dbStr = localStorage.getItem('exam_app_users_db');
+        const localUsers = dbStr ? JSON.parse(dbStr) : {};
+        const combinedUsers = { ...localUsers, ...firestoreUsers };
+        setUsersMap(combinedUsers);
       } catch (err) {
         console.error(err);
       } finally {
@@ -108,6 +127,28 @@ export default function Results() {
   }
 
   if (!examId) return <Navigate to="/exams" />;
+
+  if (examId && !isExamSupported(examId)) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center p-8 max-w-md mx-auto text-center space-y-4">
+        <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto">
+          <AlertCircle size={32} />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900">미지원 과목입니다</h2>
+        <p className="text-sm text-slate-500">
+          선택하신 과목은 현재 등급컷.com에서 정밀 분석을 지원하지 않는 과목입니다. 
+          지원 대상 과목만 입력해 주시기 바랍니다.
+        </p>
+        <Link 
+          to="/exams"
+          className="h-11 px-6 inline-flex items-center justify-center bg-slate-900 hover:bg-black text-white rounded-xl font-semibold text-sm transition-all"
+        >
+          배정 과목 목록으로 이동
+        </Link>
+      </div>
+    );
+  }
+
   if (loading) return <div className="p-12 text-center text-slate-400">결과를 집계하고 있습니다...</div>;
   if (!submission) return <div className="p-12 text-center text-slate-400">결과를 찾을 수 없습니다.</div>;
 
@@ -147,8 +188,40 @@ export default function Results() {
     rankedList.push({ ...s, rank: currentUniqueRank });
   }
 
-  // Statistics and rankings are always visible by default as requested to prevent them from "disappearing"
-  const isStatsVisible = true;
+  const subConf = (siteSettings || (() => {
+    const raw = localStorage.getItem('exam_app_site_settings_v3');
+    if (raw) {
+      try { return JSON.parse(raw); } catch {}
+    }
+    return null;
+  })())?.subjects?.[examId || ''] || {
+    minResponseRate: 40,
+    scoreChangeDiff: 1,
+    discloseGrading: true,
+    discloseStats: true,
+    allowGuestView: false
+  };
+
+  const isAdmin = userData?.role === 'admin';
+  const isGradingVisible = subConf.discloseGrading !== false || isAdmin;
+
+  const totalCapacity = getExamCapacity(examId || '');
+  const realSubmissionsCount = allSubmissions.filter(s => !s.isDummy).length;
+  const responseRate = totalCapacity > 0 ? (realSubmissionsCount / totalCapacity) * 100 : 0;
+  const responseRatePercent = responseRate.toFixed(1);
+
+  // Check if simulation was triggered to override
+  const statsStatureKey = `exam_stats_stature_${examId}`;
+  const statsStatureRaw = localStorage.getItem(statsStatureKey);
+  let isStatsForceStable = false;
+  if (statsStatureRaw) {
+    try {
+      isStatsForceStable = JSON.parse(statsStatureRaw).forceStable === true;
+    } catch (e) {}
+  }
+
+  const isResponseRateMet = responseRate >= (subConf.minResponseRate || 0);
+  const isStatsVisible = isAdmin || (isGradingVisible && subConf.discloseStats !== false && (isResponseRateMet || isStatsForceStable));
   const elapsedMinutes = 60;
   const forceStable = true;
 
@@ -276,10 +349,10 @@ export default function Results() {
           </div>
           <div className="space-y-1">
             <p className="text-indigo-100 font-bold uppercase tracking-widest text-xs">나의 점수</p>
-            <h2 className="text-7xl font-black">{submission.totalScore}점</h2>
+            <h2 className="text-7xl font-black">{isGradingVisible ? `${submission.totalScore}점` : "비공개"}</h2>
           </div>
           <p className="text-indigo-100/80 text-sm font-medium">
-            {submission.answers.length}문항 중 {correctCount}문항 정답
+            {isGradingVisible ? `${submission.answers.length}문항 중 ${correctCount}문항 정답` : "채점 결과 비공개 상태"}
           </p>
         </div>
 
@@ -293,8 +366,12 @@ export default function Results() {
             </div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">예상 등급</p>
             <h3 className="text-5xl font-black text-slate-900">
-              {isStatsVisible ? (
+              {!isGradingVisible ? (
+                <span className="text-2xl text-slate-400">비공개</span>
+              ) : isStatsVisible ? (
                 <>{stats?.grade || '-'}<span className="text-2xl ml-1 text-slate-400 font-extrabold">등급</span></>
+              ) : subConf.discloseStats === false ? (
+                <span className="text-2xl text-slate-400">비공개</span>
               ) : (
                 <span className="text-2xl text-slate-400">정산중</span>
               )}
@@ -309,12 +386,16 @@ export default function Results() {
             </div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">상위 비율</p>
             <h3 className="text-5xl font-black text-slate-900">
-              {isStatsVisible ? (
+              {!isGradingVisible ? (
+                <span className="text-2xl text-slate-400">비공개</span>
+              ) : isStatsVisible ? (
                 isRankVisible ? (
                   <>{stats?.percentile || '-'}<span className="text-2xl ml-1 text-slate-400">%</span></>
                 ) : (
                   <span className="text-2xl text-slate-400">비공개</span>
                 )
+              ) : subConf.discloseStats === false ? (
+                <span className="text-2xl text-slate-400">비공개</span>
               ) : (
                 <span className="text-2xl text-slate-400">정산중</span>
               )}
@@ -329,12 +410,16 @@ export default function Results() {
             </div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">예상 순위</p>
             <h3 className="text-5xl font-black text-slate-900">
-              {isStatsVisible ? (
+              {!isGradingVisible ? (
+                <span className="text-2xl text-slate-400">비공개</span>
+              ) : isStatsVisible ? (
                 isRankVisible ? (
                   <>{stats?.rank || '-'}<span className="text-2xl ml-1 text-slate-400">/ {stats?.totalParticipants || 400}위</span></>
                 ) : (
                   <span className="text-2xl text-slate-400">비공개</span>
                 )
+              ) : subConf.discloseStats === false ? (
+                <span className="text-2xl text-slate-400">비공개</span>
               ) : (
                 <span className="text-2xl text-slate-400">정산중</span>
               )}
@@ -366,47 +451,59 @@ export default function Results() {
       </div>
 
       {subTab === 'answers' ? (
-        <div className="bg-white border border-slate-200 rounded-[32px] overflow-hidden">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50/50">
-                <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">문항</th>
-                <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">나의 답</th>
-                <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">정답</th>
-                <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest text-center">결과</th>
-                <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">배점</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {[...submission.answers].sort((a, b) => a.number - b.number).map((item) => (
-                <tr key={item.number} className="hover:bg-slate-50/30 transition-colors">
-                  <td className="px-8 py-4 font-bold text-slate-900">{item.number}번</td>
-                  <td className="px-8 py-4">
-                    <span className={cn(
-                      "inline-flex w-8 h-8 items-center justify-center rounded-full text-sm font-bold",
-                      item.isCorrect ? "bg-indigo-50 text-indigo-600" : "bg-red-50 text-red-600"
-                    )}>
-                      {item.userAnswer}
-                    </span>
-                  </td>
-                  <td className="px-8 py-4 font-bold text-slate-600">
-                    {questions.find(q => q.number === item.number)?.answer || '-'}
-                  </td>
-                  <td className="px-8 py-4">
-                    <div className="flex justify-center">
-                      {item.isCorrect ? (
-                        <CheckCircle2 size={24} className="text-emerald-500" />
-                      ) : (
-                        <XCircle size={24} className="text-red-500" />
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-8 py-4 text-right font-bold text-slate-400">{item.score}점</td>
+        !isGradingVisible ? (
+          <div className="py-16 text-center space-y-4 bg-white p-8 border border-slate-200 rounded-[32px] shadow-sm">
+            <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center mx-auto">
+              <AlertCircle size={32} />
+            </div>
+            <h3 className="text-xl font-bold text-slate-900">채점 결과 비공개</h3>
+            <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+              해당 과목은 현재 채점 비공개 설정 상태입니다. 관리자가 채점 결과를 공개하기 전까지는 채점 상세 내용을 조회할 수 없습니다.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-[32px] overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50/50">
+                  <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">문항</th>
+                  <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">나의 답</th>
+                  <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">정답</th>
+                  <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest text-center">결과</th>
+                  <th className="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">배점</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {[...submission.answers].sort((a, b) => a.number - b.number).map((item) => (
+                  <tr key={item.number} className="hover:bg-slate-50/30 transition-colors">
+                    <td className="px-8 py-4 font-bold text-slate-900">{item.number}번</td>
+                    <td className="px-8 py-4">
+                      <span className={cn(
+                        "inline-flex w-8 h-8 items-center justify-center rounded-full text-sm font-bold",
+                        item.isCorrect ? "bg-indigo-50 text-indigo-600" : "bg-red-50 text-red-600"
+                      )}>
+                        {item.userAnswer}
+                      </span>
+                    </td>
+                    <td className="px-8 py-4 font-bold text-slate-600">
+                      {questions.find(q => q.number === item.number)?.answer || '-'}
+                    </td>
+                    <td className="px-8 py-4">
+                      <div className="flex justify-center">
+                        {item.isCorrect ? (
+                          <CheckCircle2 size={24} className="text-emerald-500" />
+                        ) : (
+                          <XCircle size={24} className="text-red-500" />
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-8 py-4 text-right font-bold text-slate-400">{item.score}점</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
       ) : (
         /* Dynamic SVG based Statistics Window & Graph */
         <div className="space-y-8 bg-white p-8 md:p-12 border border-slate-200 rounded-[40px] shadow-sm">
@@ -423,23 +520,42 @@ export default function Results() {
                 <PieChart size={28} />
               </div>
               <div className="space-y-2">
-                <h4 className="text-lg font-black text-slate-800">종합 통계 리포트 준비 중 ("정산중")</h4>
-                <p className="text-sm text-slate-400 max-w-md mx-auto font-medium leading-relaxed">
-                  가채점 점수 변동성(+-1점 이내)이 1시간 이상 유지되어 통계 수렴이 종료되면 자동으로 공개됩니다.
-                </p>
-                <div className="inline-flex flex-col items-center gap-1 bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3 mt-2">
-                  <span className="text-xs font-bold text-slate-600">⏱️ 실시간 정산 안정화 진척도</span>
-                  <span className="text-sm font-black text-indigo-650 font-sans">{elapsedMinutes}분 / 60분</span>
+                <h4 className="text-lg font-black text-slate-800">종합 통계 리포트 준비 중 / 비공개</h4>
+                {!isGradingVisible ? (
+                  <p className="text-sm text-slate-400 max-w-md mx-auto font-medium leading-relaxed">
+                    해당 과목은 현재 채점 결과 비공개 설정 상태입니다. 관리자가 채점 결과를 공개한 후 조회하실 수 있습니다.
+                  </p>
+                ) : subConf.discloseStats === false ? (
+                  <p className="text-sm text-slate-400 max-w-md mx-auto font-medium leading-relaxed">
+                    해당 과목은 현재 통계 비공개 설정 상태입니다. 관리자가 통계를 공개한 후 조회하실 수 있습니다.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    <p className="text-sm text-slate-400 max-w-md mx-auto font-medium leading-relaxed">
+                      공개 최소 응답률 조건({subConf.minResponseRate || 0}%)을 충족해야 통계가 실시간 자동 공개됩니다.
+                    </p>
+                    <div className="inline-flex flex-col items-center gap-1 bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3 mt-2">
+                      <span className="text-xs font-bold text-slate-600">⏱️ 실시간 정산 응답률 현황</span>
+                      <span className="text-sm font-black text-indigo-650 font-sans">
+                        {realSubmissionsCount}명 제출 / {totalCapacity}명 정원 ({responseRatePercent}%)
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-bold mt-1">
+                        필요 최소 응답률: {subConf.minResponseRate || 0}%
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {isGradingVisible && subConf.discloseStats !== false && (
+                <div className="pt-2">
+                  <button
+                    onClick={triggerSimulation}
+                    className="px-5 h-10 bg-indigo-50 border border-indigo-200 text-indigo-600 rounded-xl leading-none text-xs font-black hover:bg-indigo-100/50 transition-all active:scale-95"
+                  >
+                    ⚡ 시뮬레이션: 강제 공개 처리
+                  </button>
                 </div>
-              </div>
-              <div className="pt-2">
-                <button
-                  onClick={triggerSimulation}
-                  className="px-5 h-10 bg-indigo-50 border border-indigo-200 text-indigo-600 rounded-xl leading-none text-xs font-black hover:bg-indigo-100/50 transition-all active:scale-95"
-                >
-                  ⚡ 시뮬레이션: 1시간 경과로 즉시 공개 처리
-                </button>
-              </div>
+              )}
             </div>
           ) : (
             <div className="space-y-12 animate-fade-in">
@@ -462,253 +578,125 @@ export default function Results() {
                 </div>
               </div>
 
-              {/* Responsive Scatter Plot (산점도) Visualization */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-extrabold text-slate-800">
-                    📊 {currentExam?.title || '선택 과목'} 성적 분포도
-                  </h4>
-                </div>
+              {/* 과목 종합 상위 20% 등수표 (급간포진현황 대체) */}
+              {(() => {
+                const totalCapacity = allSubmissions.length || 200;
+                const realSubmissionsCount = allSubmissions.filter(s => !s.isDummy).length;
+                const responseRatePercent = totalCapacity > 0 ? ((realSubmissionsCount / totalCapacity) * 100).toFixed(1) : "0.0";
 
-                <div className="relative w-full bg-white border border-slate-200 rounded-[40px] p-6 md:p-8 flex flex-col justify-center select-none overflow-hidden shadow-sm">
-                  {(() => {
-                    const isAlgebra = currentExam?.id === 'exam-algebra';
+                return (
+                  <div className="space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <h4 className="text-sm font-extrabold text-slate-800">과목 종합 상위 20% 우수자 등수표</h4>
+                        <span className="text-[10px] font-black bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-full border border-indigo-100/50 uppercase tracking-tight">
+                          현재 응답률: {realSubmissionsCount}/{totalCapacity} ({responseRatePercent}%)
+                        </span>
+                      </div>
+                      <span className="text-xs text-slate-400 font-bold">
+                        * 전체 학업 인원 중 상위 20% 이내의 실시간 우수자 등수표입니다.
+                      </span>
+                    </div>
 
-                    // Prepare scatter points directly mapped from allSubmissions based on real N count parameters
-                    const points = (() => {
-                      if (!isAlgebra) return [];
-
-                      const pts: Array<{ id: string; x: number; y: number; isMe: boolean }> = [];
-                      
-                      allSubmissions.forEach((subItem, i) => {
-                        const yVal = subItem.totalScore || 0;
-                        let xVal = 0;
-                        if (yVal > 0) {
-                          const noise = Math.sin(i * 1.9) * 8;
-                          xVal = Math.max(10, Math.min(100, Math.round(yVal * 0.9 + 5 + noise)));
-                        } else {
-                          // Unresponded students (0 points) are positioned randomly around 0-8 on X-axis for clearer spread
-                          xVal = Math.max(0, Math.min(10, Math.round(Math.abs(Math.sin(i * 3)) * 8)));
-                        }
-
-                        pts.push({
-                          id: subItem.id || `SAMPLE-${i}`,
-                          x: xVal,
-                          y: yVal,
-                          isMe: subItem.userId === effectiveUserId
-                        });
-                      });
-
-                      // Safety backup in case current user submission is not in the array
-                      if (!pts.some(p => p.isMe)) {
-                        const myAvgVal = myAllAvg !== null ? myAllAvg : (submission?.totalScore || 75);
-                        const myExamScore = submission?.totalScore || 75;
-                        pts.push({
-                          id: 'ME',
-                          x: myAvgVal,
-                          y: myExamScore,
-                          isMe: true
-                        });
-                      }
-
-                      return pts;
-                    })();
-
-                    // SVG geometry values to perfectly match the R plot image style
-                    const svgW = 550;
-                    const svgH = 380;
-                    const padL = 60;
-                    const padR = 40;
-                    const padT = 30;
-                    const padB = 60;
-                    
-                    const plotW = svgW - padL - padR;
-                    const plotH = svgH - padT - padB;
-
-                    const getXCoord = (val: number) => padL + (val / 100) * plotW;
-                    const getYCoord = (val: number) => padT + ((100 - val) / 100) * plotH;
-
-                    // Highlight user point by default if no selection
-                    const currentActivePoint = isAlgebra ? (selectedScatterPoint || points.find(p => p.isMe)) : null;
-
-                    return (
-                      <div className="space-y-6">
-                        {/* SVG Canvas styled exactly like classical R plot with black bounding frame & red dots */}
-                        <div className="w-full overflow-x-auto">
-                          <svg viewBox={`0 0 ${svgW} ${svgH}`} className="mx-auto w-full max-w-2xl" style={{ minWidth: '450px' }}>
-                            
-                            {/* R-style pure White plotting inner area container with sharp Black Border Box */}
-                            <rect 
-                              x={padL} 
-                              y={padT} 
-                              width={plotW} 
-                              height={plotH} 
-                              fill="#ffffff" 
-                              stroke="#000000" 
-                              strokeWidth="1.5" />
-
-                            {/* Outside Ticks on X axis (pointing downwards) */}
-                            {[0, 20, 40, 60, 80, 100].map((val) => {
-                              const x = getXCoord(val);
-                              return (
-                                <g key={`xtick-${val}`}>
-                                  <line 
-                                    x1={x} 
-                                    y1={padT + plotH} 
-                                    x2={x} 
-                                    y2={padT + plotH + 5} 
-                                    stroke="#000000" 
-                                    strokeWidth="1.5" />
-                                  <text 
-                                    x={x} 
-                                    y={padT + plotH + 18} 
-                                    textAnchor="middle" 
-                                    className="text-[11px] font-bold fill-black font-sans"
-                                  >
-                                    {val}
-                                  </text>
-                                </g>
-                              );
-                            })}
-
-                            {/* X Axis Label precisely positioned below the bottom ticks */}
-                            <text
-                              x={padL + plotW / 2}
-                              y={svgH - 12}
-                              textAnchor="middle"
-                              className="text-xs font-bold fill-black font-sans"
-                            >
-                              학생 평균 점수
-                            </text>
-
-                            {/* Y Axis Label precisely positioned on the left side of ticks */}
-                            <text
-                              x={18}
-                              y={padT + plotH / 2}
-                              textAnchor="middle"
-                              transform={`rotate(-90 18 ${padT + plotH / 2})`}
-                              className="text-xs font-bold fill-black font-sans"
-                            >
-                              {currentExam?.title || '선택 과목'} 개별 점수
-                            </text>
-
-                            {/* Red Circular Dots representing students' scores precisely as in the reference image */}
-                            {isAlgebra && points.map((pt, index) => {
-                              const cx = getXCoord(pt.x);
-                              const cy = getYCoord(pt.y);
-                              const isSelected = currentActivePoint?.id === pt.id;
-
-                              if (pt.isMe) {
-                                // Highlight the current student with text indicator, while retaining clean red dot style inside
+                    <div className="bg-white border border-slate-200 rounded-[32px] overflow-hidden shadow-sm">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-100">
+                              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-center w-20">등수</th>
+                              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">학번</th>
+                              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">가채점 점수</th>
+                              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-center">백분위</th>
+                              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">등급</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {(() => {
+                              const top20Limit = Math.ceil(rankedList.length * 0.20);
+                              const top20Submissions = rankedList.slice(0, top20Limit);
+                              
+                              if (top20Submissions.length === 0) {
                                 return (
-                                  <g key={`point-me-${index}`} className="cursor-pointer" onClick={() => setSelectedScatterPoint(pt)}>
-                                    <circle
-                                      cx={cx}
-                                      cy={cy}
-                                      r="11"
-                                      className="fill-rose-500/10 stroke-rose-450 stroke-[1.5] animate-pulse" />
-                                    <circle
-                                      cx={cx}
-                                      cy={cy}
-                                      r="4.5"
-                                      className="fill-red-600 stroke-white stroke-[1.5]" />
-                                    <text
-                                      x={cx + 8}
-                                      y={cy - 6}
-                                      className="text-[9px] font-black fill-red-600 bg-white px-1 py-0.5 rounded border border-red-250 select-none shadow-sm"
-                                    >
-                                      나
-                                    </text>
-                                  </g>
+                                  <tr>
+                                    <td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-400">
+                                      집계된 데이터가 없습니다.
+                                    </td>
+                                  </tr>
                                 );
                               }
 
-                              return (
-                                <circle
-                                  key={`point-sample-${index}`}
-                                  cx={cx}
-                                  cy={cy}
-                                  r={isSelected ? "5.5" : "3.5"}
-                                  onClick={() => setSelectedScatterPoint(pt)}
-                                  className={cn(
-                                    "cursor-pointer transition-all duration-150 fill-red-600 hover:fill-red-750 stroke-white stroke-[0.5]",
-                                    isSelected ? "stroke-black stroke-[1.5] fill-red-750" : ""
-                                  )} />
-                              );
-                            })}
-                          </svg>
-                        </div>
+                              return top20Submissions.map((sub) => {
+                                const isMe = sub.userId === effectiveUserId;
+                                const displayName = getDisplayName(sub.userId, sub.isDummy);
+                                const grade = GradeCalculator.calculateGrade(sub.rank / rankedList.length * 100);
 
-                        {/* Selected Telemetry Card Details */}
-                        {isAlgebra && currentActivePoint && (
-                          <div className="bg-slate-50 border border-slate-200 rounded-3xl p-6 flex flex-col sm:flex-row justify-around items-center gap-6 animate-fade-in">
-                            <div className="text-center px-6 py-2">
-                              <span className="text-xs text-slate-500 font-bold block mb-1">전과목 종합 학업 평균 점수</span>
-                              <span className="text-3xl font-black text-slate-800 font-sans">{currentActivePoint.x}점</span>
-                            </div>
-                            <div className="hidden sm:block w-px h-14 bg-slate-200" />
-                            <div className="text-center px-6 py-2">
-                              <span className="text-xs text-slate-500 font-bold block mb-1">{currentExam?.title || '과목'} 점수</span>
-                              <span className="text-3xl font-black text-red-650 font-sans">{currentActivePoint.y}점</span>
-                            </div>
-                          </div>
-                        )}
+                                return (
+                                  <tr 
+                                    key={sub.id} 
+                                    className={cn(
+                                      "hover:bg-slate-50/50 transition-colors",
+                                      isMe ? "bg-indigo-50/40 font-bold" : "",
+                                      grade === 1 && !isMe ? "bg-emerald-50/10" : ""
+                                    )}
+                                  >
+                                    <td className="px-6 py-4 text-center">
+                                      <div className={cn(
+                                        "w-7 h-7 rounded-full flex items-center justify-center font-black text-xs mx-auto",
+                                        sub.rank === 1 ? "bg-amber-400 text-white shadow-sm" : 
+                                        sub.rank === 2 ? "bg-slate-300 text-white shadow-sm" :
+                                        sub.rank === 3 ? "bg-orange-300 text-white shadow-sm" : "text-slate-500 bg-slate-50"
+                                      )}>
+                                        {sub.rank}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="flex items-center gap-2">
+                                        <span className={cn("text-sm", isMe ? "text-indigo-600 font-extrabold" : "text-slate-800 font-semibold")}>
+                                          {displayName}
+                                        </span>
+                                        {isMe && (
+                                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white uppercase font-sans">
+                                            나
+                                          </span>
+                                        )}
+                                        {sub.isDummy && (
+                                          <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 border border-slate-150">
+                                            시뮬레이션
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                      <span className="text-base font-black text-slate-900">{sub.totalScore}</span>
+                                      <span className="text-xs text-slate-400 ml-1">점</span>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                      <span className="text-xs font-bold text-indigo-600">
+                                        {(100 - (sub.rank / rankedList.length * 100)).toFixed(0)}%
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                      <span className={cn(
+                                        "text-xs font-black px-2 py-0.5 rounded border",
+                                        grade === 1 ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
+                                        grade === 2 ? "bg-blue-50 text-blue-600 border-blue-100" :
+                                        grade === 3 ? "bg-indigo-50 text-indigo-600 border-indigo-100" :
+                                        "bg-slate-50 text-slate-600 border-slate-100"
+                                      )}>
+                                        {grade}등급
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              });
+                            })()}
+                          </tbody>
+                        </table>
                       </div>
-                    );
-                  })()}
-                </div>
-              </div>
-
-                <div className="flex items-center justify-between pt-4">
-                  <h4 className="text-sm font-extrabold text-slate-800">과목 종합 성적대별 급간 포진 현황</h4>
-                </div>
-                
-                <div className="bg-slate-50 border border-slate-100 rounded-3xl p-6 md:p-8 space-y-4">
-                  {buckets.map((b, idx) => {
-                    const userScore = submission?.totalScore || 0;
-                    const isMyBucket = userScore >= b.min && userScore <= b.max;
-                    const percentage = Math.round((b.count / totalSubmissions) * 100);
-
-                    return (
-                      <div
-                        key={b.label}
-                        className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-2xl transition-all ${
-                          isMyBucket 
-                            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 font-bold' 
-                            : 'bg-white border border-slate-150 hover:bg-slate-50/50 text-slate-700'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 shrink-0">
-                          <span className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${
-                            isMyBucket ? 'bg-white text-indigo-600' : 'bg-slate-100 text-slate-600'
-                          }`}>
-                            {idx + 1}
-                          </span>
-                          <div className="flex flex-col">
-                            <span className="text-sm font-black">{b.label}</span>
-                            {isMyBucket && (
-                              <span className="text-[10px] text-indigo-205 font-extrabold uppercase tracking-wider block">나의 점수대 ({userScore}점)</span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-4 w-full sm:max-w-md mt-3 sm:mt-0">
-                          <div className="w-full bg-slate-100/60 rounded-full h-3 inline-block overflow-hidden relative">
-                            <div
-                              style={{ width: `${percentage}%` }}
-                              className={`h-full rounded-full transition-all ${
-                                isMyBucket ? 'bg-white' : 'bg-indigo-505 bg-indigo-500'
-                              }`}
-                            />
-                          </div>
-                          <span className="text-xs font-black tracking-tabular shrink-0 min-w-[55px] text-right">
-                            {b.count}명 ({percentage}%)
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Problem Statistics Analysis (문제별 분석) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

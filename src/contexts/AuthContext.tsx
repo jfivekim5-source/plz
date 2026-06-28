@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { db, isPlaceholder } from '@/src/lib/firebase';
+import { doc, getDocs, setDoc, collection, deleteDoc } from 'firebase/firestore';
 
 interface UserData {
   uid: string;
@@ -25,6 +27,7 @@ interface AuthContextType {
   updateProfileNickname: (nickname: string) => Promise<void>;
   togglePrivacy: () => Promise<void>;
   saveSelectedSubjects: (subjects: string[]) => Promise<void>;
+  resetDatabase: () => Promise<void>;
   logout: () => void;
 }
 
@@ -34,39 +37,57 @@ const LOCAL_STORAGE_KEY = 'exam_app_session';
 const USERS_DB_KEY = 'exam_app_users_db';
 const RESULTS_DB_KEY = 'exam_app_results_db';
 
-// PREDEFINED_STUDENTS lists 30 students of 2학년 1반 (Grade 2 Class 1)
-const PREDEFINED_STUDENTS = [
-  { studentId: '26-20101', name: '', code: 'CD26-20101-7A39' },
-  { studentId: '26-20102', name: '', code: 'CD26-20102-4D91' },
-  { studentId: '26-20103', name: '', code: 'CD26-20103-6E82' },
-  { studentId: '26-20104', name: '', code: 'CD26-20104-5C29' },
-  { studentId: '26-20105', name: '', code: 'CD26-20105-8B74' },
-  { studentId: '26-20106', name: '', code: 'CD26-20106-2F10' },
-  { studentId: '26-20107', name: '', code: 'CD26-20107-9H53' },
-  { studentId: '26-20108', name: '', code: 'CD26-20108-3K81' },
-  { studentId: '26-20109', name: '', code: 'CD26-20109-1A92' },
-  { studentId: '26-20110', name: '', code: 'CD26-20110-5X47' },
-  { studentId: '26-20111', name: '', code: 'CD26-20111-9V63' },
-  { studentId: '26-20112', name: '', code: 'CD26-20112-2M84' },
-  { studentId: '26-20113', name: '', code: 'CD26-20113-7L39' },
-  { studentId: '26-20114', name: '', code: 'CD26-20114-4R18' },
-  { studentId: '26-20115', name: '', code: 'CD26-20115-8D62' },
-  { studentId: '26-20116', name: '', code: 'CD26-20116-3T95' },
-  { studentId: '26-20117', name: '', code: 'CD26-20117-6N54' },
-  { studentId: '26-20118', name: '', code: 'CD26-20118-1W82' },
-  { studentId: '26-20119', name: '', code: 'CD26-20119-9Y73' },
-  { studentId: '26-20120', name: '', code: 'CD26-20120-2S41' },
-  { studentId: '26-20121', name: '', code: 'CD26-20121-5G29' },
-  { studentId: '26-20122', name: '', code: 'CD26-20122-8H47' },
-  { studentId: '26-20123', name: '', code: 'CD26-20123-3K19' },
-  { studentId: '26-20124', name: '', code: 'CD26-20124-7P83' },
-  { studentId: '26-20125', name: '', code: 'CD26-20125-1Q54' },
-  { studentId: '26-20126', name: '', code: 'CD26-20126-6C62' },
-  { studentId: '26-20127', name: '', code: 'CD26-20127-9X18' },
-  { studentId: '26-20128', name: '', code: 'CD26-20128-4J27' },
-  { studentId: '26-20129', name: '', code: 'CD26-20129-8N39' },
-  { studentId: '26-20130', name: '', code: 'CD26-20130-2Z74' },
-];
+// Deterministic hash to generate a secure and elegant 4-character invite code
+function getDeterministicHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) & 0xffffffff;
+  }
+  const hashValue = Math.abs(hash);
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let result = '';
+  let temp = hashValue;
+  for (let i = 0; i < 4; i++) {
+    result += chars[temp % chars.length];
+    temp = Math.floor(temp / chars.length);
+  }
+  return result;
+}
+
+// Dynamically generate the 434 students of Grade 2
+const generatePredefinedStudents = (): { studentId: string; name: string; code: string }[] => {
+  const students: { studentId: string; name: string; code: string }[] = [];
+  
+  // 1. 20n01 ~ 20n31 (n is 1 to 9)
+  for (let n = 1; n <= 9; n++) {
+    for (let idx = 1; idx <= 31; idx++) {
+      const classStr = n.toString();
+      const idxStr = idx.toString().padStart(2, '0');
+      const studentNum = `20${classStr}${idxStr}`; // e.g., 20101
+      const studentId = `26-${studentNum}`;
+      const hash = getDeterministicHash(studentId);
+      const code = `CD26-${studentNum}-${hash}`;
+      students.push({ studentId, name: '', code });
+    }
+  }
+  
+  // 2. 21m01 ~ 21m31 (m is 0 to 4)
+  for (let m = 0; m <= 4; m++) {
+    for (let idx = 1; idx <= 31; idx++) {
+      const classStr = m.toString();
+      const idxStr = idx.toString().padStart(2, '0');
+      const studentNum = `21${classStr}${idxStr}`; // e.g., 21001
+      const studentId = `26-${studentNum}`;
+      const hash = getDeterministicHash(studentId);
+      const code = `CD26-${studentNum}-${hash}`;
+      students.push({ studentId, name: '', code });
+    }
+  }
+  
+  return students;
+};
+
+const PREDEFINED_STUDENTS = generatePredefinedStudents();
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<{ uid: string } | null>(null);
@@ -74,92 +95,110 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      // Initialize DB with fixed accounts if empty or not fully populated
-      const db = getInternalDB();
-      const adminId = '26-20411';
-      const cleanDB: Record<string, UserData> = {};
+    async function initAuth() {
+      try {
+        // Initialize DB with fixed accounts if empty or not fully populated
+        const localDb = getInternalDB();
+        const adminId = '26-20411';
+        const cleanDB: Record<string, UserData> = {};
 
-      const defaultSubjects = ['exam-speech-lang', 'exam-english1', 'exam-algebra', 'exam-physics', 'exam-earth', 'exam-ai-basics'];
+        const defaultSubjects = ['exam-speech-lang', 'exam-english1', 'exam-algebra', 'exam-physics', 'exam-earth', 'exam-ai-basics'];
 
-      // Keep / Initialize Admin
-      if (db[adminId]) {
-        cleanDB[adminId] = {
-          ...db[adminId],
-          role: 'admin',
-          password: db[adminId].password || '26-20411'
-        };
-      } else {
-        cleanDB[adminId] = {
-          uid: adminId,
-          studentId: adminId,
-          name: '관리자 (Admin)',
-          role: 'admin',
-          status: 'approved',
-          isProfileComplete: true,
-          selectedSubjects: defaultSubjects,
-          password: '26-20411'
-        };
-      }
+        // Try fetching all users from Firestore if available
+        let firestoreUsers: Record<string, UserData> = {};
+        if (!isPlaceholder && db) {
+          try {
+            const querySnap = await getDocs(collection(db, 'users'));
+            querySnap.forEach((doc) => {
+              firestoreUsers[doc.id] = doc.data() as UserData;
+            });
+          } catch (e) {
+            console.error("Failed to load users from Firestore", e);
+          }
+        }
 
-      // Initialize students of Class 2-1
-      PREDEFINED_STUDENTS.forEach(student => {
-        const sid = student.studentId;
-        if (db[sid]) {
-          // Keep registered student data
-          cleanDB[sid] = {
-            ...db[sid],
-            uid: sid,
-            studentId: sid,
-            name: student.name,
-            code: student.code,
-            role: 'user',
-            status: 'approved',
+        // Keep / Initialize Admin
+        const combinedAdmin = firestoreUsers[adminId] || localDb[adminId];
+        if (combinedAdmin) {
+          cleanDB[adminId] = {
+            ...combinedAdmin,
+            role: 'admin',
+            password: combinedAdmin.password || '26-20411'
           };
         } else {
-          cleanDB[sid] = {
-            uid: sid,
-            studentId: sid,
-            name: student.name,
-            code: student.code,
-            role: 'user',
+          cleanDB[adminId] = {
+            uid: adminId,
+            studentId: adminId,
+            name: '관리자 (Admin)',
+            role: 'admin',
             status: 'approved',
-            isProfileComplete: false,
-            // Password remains empty until registered via their Code!
-            password: '', 
-            selectedSubjects: [],
+            isProfileComplete: true,
+            selectedSubjects: defaultSubjects,
+            password: '26-20411'
           };
         }
-      });
 
-      // Completely overwrite user DB with ONLY admin and the predefined 30 students!
-      // This deletes any other unregistered, unapproved or raw dummy accounts.
-      localStorage.setItem(USERS_DB_KEY, JSON.stringify(cleanDB));
-
-      const savedSession = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (savedSession) {
-        try {
-          let data = JSON.parse(savedSession) as UserData;
-          const currentDB = cleanDB;
-          const freshData = currentDB[data.uid];
-          
-          if (freshData) {
-            // Restore fresh profile complete status and subjects
-            setUser({ uid: freshData.uid });
-            setUserData(freshData);
+        // Initialize students of Class 2-1
+        PREDEFINED_STUDENTS.forEach(student => {
+          const sid = student.studentId;
+          const combinedStudent = firestoreUsers[sid] || localDb[sid];
+          if (combinedStudent) {
+            // Keep registered student data
+            cleanDB[sid] = {
+              ...combinedStudent,
+              uid: sid,
+              studentId: sid,
+              name: student.name || combinedStudent.name || '',
+              code: student.code,
+              role: 'user',
+              status: 'approved',
+            };
           } else {
-            // If the user in session is deleted (not part of the 30 allowed students or admin)
+            cleanDB[sid] = {
+              uid: sid,
+              studentId: sid,
+              name: student.name,
+              code: student.code,
+              role: 'user',
+              status: 'approved',
+              isProfileComplete: false,
+              // Password remains empty until registered via their Code!
+              password: '', 
+              selectedSubjects: [],
+            };
+          }
+        });
+
+        // Completely overwrite user DB with ONLY admin and the predefined 30 students!
+        // This deletes any other unregistered, unapproved or raw dummy accounts.
+        localStorage.setItem(USERS_DB_KEY, JSON.stringify(cleanDB));
+
+        const savedSession = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (savedSession) {
+          try {
+            let data = JSON.parse(savedSession) as UserData;
+            const freshData = cleanDB[data.uid];
+            
+            if (freshData) {
+              // Restore fresh profile complete status and subjects
+              setUser({ uid: freshData.uid });
+              setUserData(freshData);
+            } else {
+              // If the user in session is deleted (not part of the 30 allowed students or admin)
+              localStorage.removeItem(LOCAL_STORAGE_KEY);
+            }
+          } catch (e) {
+            console.warn("Session restore failed", e);
             localStorage.removeItem(LOCAL_STORAGE_KEY);
           }
-        } catch (e) {
-          console.warn("Session restore failed", e);
-          localStorage.removeItem(LOCAL_STORAGE_KEY);
         }
+      } catch (e) {
+        console.error("Auth initialization fatal error", e);
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      console.error("Auth initialization fatal error", e);
     }
-    setLoading(false);
+    initAuth();
   }, []);
 
   const getInternalDB = (): Record<string, UserData> => {
@@ -207,7 +246,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Student Login
     if (!existingUser.password) {
-      throw new Error("최초 가입자입니다. 하단의 '인증 코드로 로그인'을 통해 할당받은 인증 코드로 최초 접속하여 비밀번호를 설정해 주시기 바랍니다.");
+      throw new Error("최초 접속자입니다. 상단의 '인증 코드로 입장'을 통해 할당받은 인증 코드로 최초 접속하여 비밀번호를 설정해 주시기 바랍니다.");
     }
 
     if (existingUser.password !== pass) {
@@ -232,11 +271,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(targetUser);
   };
 
-  const setSession = (data: UserData) => {
+  const setSession = async (data: UserData) => {
     setUser({ uid: data.uid });
     setUserData(data);
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
     saveToInternalDB(data);
+
+    // Synchronize to Firestore for cross-account/cross-device visibility
+    if (!isPlaceholder && db) {
+      try {
+        await setDoc(doc(db, 'users', data.uid), data, { merge: true });
+      } catch (e) {
+        console.error("Failed to sync user session to Firestore", e);
+      }
+    }
   };
 
   const setupPassword = async (password: string) => {
@@ -289,6 +337,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(updated);
   };
 
+  const resetDatabase = async () => {
+    // 1. Clear Local Storage
+    localStorage.removeItem(LOCAL_STORAGE_KEY);
+    localStorage.removeItem(USERS_DB_KEY);
+    localStorage.removeItem(RESULTS_DB_KEY);
+    localStorage.removeItem('exam_app_real_submissions_v3');
+    
+    // 2. Firestore reset (if not placeholder)
+    if (!isPlaceholder && db) {
+      try {
+        // Clear users collection except Admin
+        const usersSnap = await getDocs(collection(db, 'users'));
+        for (const docObj of usersSnap.docs) {
+          if (docObj.id !== '26-20411') {
+            await deleteDoc(docObj.ref);
+          }
+        }
+        
+        // Clear submissions for all 8 exams
+        const examIds = [
+          'exam-speech-lang',
+          'exam-algebra',
+          'exam-english1',
+          'exam-physics',
+          'exam-chemistry',
+          'exam-earth',
+          'exam-ai-basics',
+          'exam-ai-math'
+        ];
+        
+        for (const examId of examIds) {
+          try {
+            const subsSnap = await getDocs(collection(db, 'exams', examId, 'submissions'));
+            for (const docObj of subsSnap.docs) {
+              await deleteDoc(docObj.ref);
+            }
+          } catch (e) {
+            console.error(`Failed to clear submissions for ${examId}:`, e);
+          }
+        }
+      } catch (e) {
+        console.error("Firestore database reset failed:", e);
+        throw e;
+      }
+    }
+    
+    // Reload to force re-initialization
+    window.location.href = '/login';
+  };
+
   const logout = () => {
     setUser(null);
     setUserData(null);
@@ -308,6 +406,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       updateProfileNickname,
       togglePrivacy,
       saveSelectedSubjects,
+      resetDatabase,
       logout
     }}>
       {children}
